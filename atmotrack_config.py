@@ -3,7 +3,7 @@
 
 # General options
 
-path_in = "/vg6/dargueso-NO-BKUP/postprocessed/unified/EPICC/EPICC_2km_ERA5_CMIP6anom_HVC_GWD/"
+#path_in = "/vg6/dargueso-NO-BKUP/postprocessed/unified/EPICC/EPICC_2km_ERA5_CMIP6anom_HVC_GWD/"
 DT = 6 # time step of data in hours
 
 
@@ -44,8 +44,11 @@ smooth_sigma_z500 = 0  # Gaussion std for z500 smoothing
 z500_smooth_low_anom = -80 # lower threshold for smooth z500 anomaly
 z500_smooth_high_anom = 70 # upper threshold for smooth z500 anomaly
 
+
 MinTimeCY = 12             # minimum livetime of cyclones [hours]
 MinTimeACY = 12             # minimum livetime of anticyclone [hours]
+
+MaxDistCYFeatures = 500000 # maximum distance features in cyclones and anticyclones in m to split them
 
 #####################################################################
 #####################################################################
@@ -54,4 +57,21 @@ MinTimeACY = 12             # minimum livetime of anticyclone [hours]
 ## COL config
 # Cut-Off Low tracking options
 
-col_buffer = 500000 # area around the cyclone in m
+col_buffer = 600000 # area around the cyclone in m
+col_min_dur = 24 # minimum livetime of COL [hours]
+col_z500_threshold_min = 9999 # minimum z500 value to consider a COL [m] Set to 9999 to disable
+col_region = [-15, 10, 30, 45] # region to track COLs, the centre of mass must be inside this region at some point [lon_min, lon_max, lat_min, lat_max]
+col_percent_isolation = 0.80 # percentage of points in the ring that must be above a threshold with respect to the minimum value to consider it isolated
+col_ring_isolation = 400000 # distance in m from the centre of the COL to the ring to check isolation
+col_thres_isolation = 80 # minimum difference in z500 (m) between minimum and points in the ring to define isolation
+col_min_lat = 25 # all grid points of the system must be north of this to be considered a COL
+col_max_lat = 60 # all grid points of the system must be south of this to be considered a COL
+col_min_lon = -29 # all grid points of the system must be east of this to be considered a COL
+col_max_lon = 19 # all grid points of the system must be west of this to be considered a COL
+#####################################################################
+#####################################################################
+
+# Fronts tracking options
+
+front_treshold=0.5
+MinAreaFR=50000

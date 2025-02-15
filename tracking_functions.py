@@ -24,9 +24,13 @@ import netCDF4 as nc
 import pandas as pd
 import xarray as xr
 
-from scipy.ndimage import filters
+import metpy.calc as calc
+
+from scipy.ndimage import filters, distance_transform_edt
 from scipy.ndimage import morphology
 from scipy import ndimage
+from scipy.spatial.distance import cdist
+
 
 from constants import const
 import atmotrack_config as cfg
@@ -136,7 +140,15 @@ def remove_small_short_objects(objects_id,area_objects,min_area,min_time,DT):
 
     return sel_objects
 
+def relabel_to_consecutive(labels):
+    unique_labels = np.unique(labels)  # Get unique labels
+    new_labels = np.zeros_like(labels) # Initialize array with the same shape as input
+    mapping = {old_label: new_label for new_label, old_label in enumerate(unique_labels)}
 
+    for old_label, new_label in mapping.items():
+        new_labels[labels == old_label] = new_label
+
+    return new_labels
 
 ###########################################################
 ###########################################################
@@ -461,12 +473,203 @@ def clean_up_objects(DATA,
         
     return objectsTMP, obj_splitmerge_clean
 
+#####################################################################
+#####################################################################
+
+
+def split_objects(old_objects, distance_threshold=10):
+    # Make a copy of old_objects to store the new labels
+    new_objects = np.copy(old_objects)
+
+    # Track labels that need to be reassigned across timesteps
+    last_labels_positions = {}
+
+    # Iterate over each time step
+    for t in range(old_objects.shape[0]):
+        # Get the labeled objects for the current time slice
+        slice_data = old_objects[t]
+        unique_labels = np.unique(slice_data[slice_data > 0])  # Ignore background (label 0)
+
+        current_labels_positions = {}
+
+        for label_id in unique_labels:
+            # Create a mask for the current object
+            mask = slice_data == label_id
+
+            # Label disconnected regions within this object
+            relabeled, num_features = ndimage.label(mask)
+
+            # If there are multiple disconnected regions
+            if num_features > 1:
+                # Compute distance transform within the original mask
+                distance_map = distance_transform_edt(mask)
+
+                # Measure the centroid of each feature within the object
+                regions = [np.argwhere(relabeled == i) for i in range(1, num_features + 1)]
+                
+                for i, region_i in enumerate(regions):
+                    for j, region_j in enumerate(regions[i + 1:], start=i + 1):
+                        # Calculate the maximum distance in the distance map for each region
+                        max_dist_i = distance_map[tuple(region_i.T)].max()
+                        max_dist_j = distance_map[tuple(region_j.T)].max()
+
+                        # Check if the maximum distance between these regions exceeds the threshold
+                        distance = np.linalg.norm(region_i.mean(axis=0) - region_j.mean(axis=0))
+                        if distance > distance_threshold or (max_dist_i > distance_threshold and max_dist_j > distance_threshold):
+                            new_label = np.max(new_objects) + 1
+                            new_objects[t][relabeled == j + 1] = new_label
+                            current_labels_positions[new_label] = region_j.mean(axis=0)
+                            current_labels_positions[label_id] = region_i.mean(axis=0)
+            else:
+                # Only one connected region, store its centroid
+                current_labels_positions[label_id] = np.argwhere(mask).mean(axis=0)
+
+        # Prepare a separate dictionary for relabeling
+        relabel_updates = {}
+
+        # Check if any label should be reassigned based on proximity to previous timestep labels
+        if t > 0:
+            for current_label, current_pos in current_labels_positions.items():
+                # Compare each current position with previous labels' positions
+                closest_prev_label, closest_prev_pos = min(
+                    last_labels_positions.items(),
+                    key=lambda item: np.linalg.norm(item[1] - current_pos),
+                    default=(None, None)
+                )
+                # Relabel if the closest previous label is within the distance threshold
+                if closest_prev_label is not None and np.linalg.norm(closest_prev_pos - current_pos) < distance_threshold:
+                    relabel_updates[current_label] = closest_prev_label
+
+        # Apply relabel updates after iteration to avoid modifying during the loop
+        for current_label, new_label in relabel_updates.items():
+            new_objects[t][new_objects[t] == current_label] = new_label
+            current_labels_positions[new_label] = current_labels_positions.pop(current_label)  # Update position with new label
+
+        # Update last positions for the next timestep
+        last_labels_positions = current_labels_positions
+
+    return new_objects
+#####################################################################
+#####################################################################
+
+
+
+
+def Front_tracking(u850, v850, t850, times, Lon, Lat, Mask=None):
+    """
+    Calculate front objects based on u850, v850, and t850 fields.
+    
+    Parameters:
+        u850 (ndarray): Zonal wind component at 850 hPa.
+        v850 (ndarray): Meridional wind component at 850 hPa.
+        t850 (ndarray): Temperature field at 850 hPa.
+        Lat (ndarray): Latitude array.
+        Lon (ndarray): Longitude array.
+        Mask (ndarray, optional): Mask to exclude regions (e.g., tropics) if needed.
+        
+    Returns:
+        ndarray: Array of front objects, labeled with unique integer values.
+    """
+    
+    #Reading tracking parameters
+    
+    DT = cfg.DT
+    front_treshold = cfg.front_treshold
+    MinAreaFR = cfg.MinAreaFR 
+    
+    # Calculate the horizontal derivatives of u and v
+    
+    dx,dy,_,_ = calc_grid_distance_area(Lat,Lon)
+    
+    du = np.gradient(np.array(u850))
+    dv = np.gradient(np.array(v850))
+    
+    # Calculate potential vorticity term for frontal detection
+    PV = np.abs(dv[-1] / dx[None, :] - du[-2] / dy[None, :])
+    
+    # Calculate the temperature gradient magnitude
+    vgrad = np.gradient(np.array(t850), axis=(1, 2))
+    Tgrad = np.sqrt(vgrad[0]**2 + vgrad[1]**2)
+    
+    # Calculate Fstar, the frontal diagnostic variable
+    Fstar = PV * Tgrad
+    
+    # Set a threshold for temperature gradient (optional, based on literature)
+    Tgrad_zero = 0.45  # Assumed threshold in K/(100 km)
+    
+    # Calculate the Coriolis parameter
+    CoriolisPar = np.array(calc.coriolis_parameter(np.deg2rad(Lat)))
+    
+    # Calculate the Frontal Diagnostic
+    Frontal_Diagnostic = np.array(Fstar / (CoriolisPar * Tgrad_zero))
+    
+    # Apply mask to exclude regions if necessary
+    if Mask is not None:
+        FrontMask = np.copy(Mask)
+        FrontMask[np.abs(Lat) < 10] = 0  # Exclude tropics by default
+        Frontal_Diagnostic = np.abs(Frontal_Diagnostic)
+        Frontal_Diagnostic[:, FrontMask == 0] = 0
+
+    # Define a structural element for connected components
+    rgiObj_Struct_Fronts = np.zeros((3, 3, 3))
+    rgiObj_Struct_Fronts[1, :, :] = 1
+    
+    # Apply the front threshold to create a binary mask
+    Fmask = (Frontal_Diagnostic > front_treshold)
+    
+    # Label connected regions that exceed the threshold
+    rgiObjectsUD, nr_objectsUD = ndimage.label(Fmask, structure=rgiObj_Struct_Fronts)
+    logging.debug(f'{Fore.GREEN}  {str(nr_objectsUD)} object(s) found')
+    
+    # Define the grid cell area if not provided
+    # Assume approximately equal area if you don't have exact Area data
+    if Mask is not None:
+        Area = np.copy(Mask) * (dx * dy)
+    else:
+        Area = np.ones_like(Frontal_Diagnostic) * (dx * dy)
+    
+    # Calculate the area of each object
+    Objects = ndimage.find_objects(rgiObjectsUD)
+        
+    rgiAreaObj = []
+
+    # Loop through each identified object
+    for ob in range(nr_objectsUD):
+        # Get the slice for the current object
+        area_slice =  Area[Objects[ob]]
+        object_slice = rgiObjectsUD[Objects[ob]]
+                
+        # Calculate the area of the current object where the label matches (ob + 1)
+        try:
+            object_area = np.sum(area_slice[object_slice == ob + 1])
+        except:
+            import pdb; pdb.set_trace()  # fmt: skip
+        
+        # Append the computed area to the list
+        rgiAreaObj.append(object_area)
+
+    # Convert the list to a NumPy array for further processing
+    rgiAreaObj = np.array(rgiAreaObj)
+    
+    # rgiAreaObj = np.array([
+    #     np.sum(Area[Objects[ob][1:]][rgiObjectsUD[Objects[ob]][0, :, :] == ob + 1]) 
+    #     for ob in range(nr_objectsUD)
+    # ])
+    
+    # Create the final object array, excluding small objects
+    FR_objects = np.copy(rgiObjectsUD)
+    TooSmall = np.where(rgiAreaObj < MinAreaFR * 1000**2)  # Convert MinAreaFR to square meters
+    FR_objects[np.isin(FR_objects, TooSmall[0] + 1)] = 0
+    
+    return FR_objects
+
+    
 
 ############################################################
 ###########################################################
 #### ======================================================
 # function to perform MCS tracking
-def MCStracking(
+def MCS_tracking(
     pr_data,
     bt_data,
     times,
@@ -749,89 +952,6 @@ def MCStracking(
                                                  'BT_objects':{'zlib': True,'complevel': 5},
                                                  'MCS_objects':{'zlib': True,'complevel': 5}})
 
-
-    # fino = xr.Dataset({
-    # 'MCS_objects': xr.DataArray(
-    #             data   = objects_id_MCS,   # enter data here
-    #             dims   = ['time','y','x'],
-    #             attrs  = {
-    #                 '_FillValue': const.missingval,
-    #                 'long_name': 'Mesoscale Convective System objects',
-    #                 'units'     : '',
-    #                 }
-    #             ),
-    # 'PR_objects': xr.DataArray(
-    #             data   = objects_id_pr,   # enter data here
-    #             dims   = ['time','y','x'],
-    #             attrs  = {
-    #                 '_FillValue': const.missingval,
-    #                 'long_name': 'Precipitation objects',
-    #                 'units'     : '',
-    #                 }
-    #             ),
-    # 'BT_objects': xr.DataArray(
-    #             data   = objects_id_bt,   # enter data here
-    #             dims   = ['time','y','x'],
-    #             attrs  = {
-    #                 '_FillValue': const.missingval,
-    #                 'long_name': 'Cloud (brightness temperature) objects',
-    #                 'units'     : '',
-    #                 }
-    #             ),
-    # 'PR': xr.DataArray(
-    #             data   = pr_data,   # enter data here
-    #             dims   = ['time','y','x'],
-    #             attrs  = {
-    #                 '_FillValue': const.missingval,
-    #                 'long_name': 'Precipitation',
-    #                 'standard_name': 'precipitation',
-    #                 'units'     : 'mm h-1',
-    #                 }
-    #             ),
-    # 'BT': xr.DataArray(
-    #             data   = bt_data,   # enter data here
-    #             dims   = ['time','y','x'],
-    #             attrs  = {
-    #                 '_FillValue': const.missingval,
-    #                 'long_name': 'Brightness temperature',
-    #                 'standard_name': 'brightness_temperature',
-    #                 'units'     : 'K',
-    #                 }
-    #             ),
-    # 'lat': xr.DataArray(
-    #             data   = Lat,   # enter data here
-    #             dims   = ['y','x'],
-    #             attrs  = {
-    #                 '_FillValue': const.missingval,
-    #                 'long_name': "latitude",
-    #                 'standard_name': "latitude",
-    #                 'units'     : "degrees_north",
-    #                 }
-    #             ),
-    # 'lon': xr.DataArray(
-    #             data   = Lon,   # enter data here
-    #             dims   = ['y','x'],
-    #             attrs  = {
-    #                 '_FillValue': const.missingval,
-    #                 'long_name': "longitude",
-    #                 'standard_name': "longitude",
-    #                 'units'     : "degrees_east",
-    #                 }
-    #             ),
-    #         },
-    #     attrs = {'date':datetime.date.today().strftime('%Y-%m-%d'),
-    #              "comments": "File created with MCS_tracking"},
-    #     coords={'time':times.values}
-    # )
-
-
-    # fino.to_netcdf(nc_file,mode='w',format = "NETCDF4",
-    #                encoding={'PR':{'zlib': True,'complevel': 5},
-    #                          'PR_objects':{'zlib': True,'complevel': 5},
-    #                          'BT':{'zlib': True,'complevel': 5},
-    #                          'BT_objects':{'zlib': True,'complevel': 5}})
-
-
         end_time = time.time()
         logging.debug(f"======> 'Writing files: {(end_time-start_time):.2f} seconds \n")
         start_time = time.time()
@@ -868,6 +988,7 @@ def CY_ACY_z500_tracking(
     MinTimeACY = cfg.MinTimeACY
 
 
+
     #Calculating grid distances and areas
     _,_,grid_cell_area,grid_spacing = calc_grid_distance_area(Lat,Lon)
     grid_cell_area[grid_cell_area < 0] = 0
@@ -901,8 +1022,7 @@ def CY_ACY_z500_tracking(
 
     z_low = z500_smooth_anom < z500_low_anom
     z_high = z500_smooth_anom > z500_high_anom
-
-
+    
 
 
     objects_id_z500_low, low_num_objects = ndimage.label(z_low, structure=obj_structure_3D)
@@ -964,10 +1084,14 @@ def CY_ACY_z500_tracking(
 #####################################################################
 
 
-def COLtracking(cy_z500_objects,
+def COL_tracking(cy_z500_objects,
                 z500_data,
                 u200_data,
-                frontal_diag = None,
+                u850_data,
+                v850_data,
+                t850_data,
+                pr_data,
+                pr_data_max,
                 times = None,
                 Lon = None,
                 Lat = None,
@@ -975,34 +1099,58 @@ def COLtracking(cy_z500_objects,
     """ Function to determine if a cyclone is a cut-off low
     """
 
-    start = time.time()
+    start_time = time.time()
 
     #Reading tracking parameters
     col_buffer = cfg.col_buffer
+    col_region = cfg.col_region
+    DT = cfg.DT
+    col_min_dur = cfg.col_min_dur
+    MaxDistCYFeatures = cfg.MaxDistCYFeatures
+    col_z500_threshold_min = cfg.col_z500_threshold_min
+    col_percent_isolation = cfg.col_percent_isolation
+    col_ring_isolation = cfg.col_ring_isolation
+    col_thres_isolation = cfg.col_thres_isolation
 
+    col_min_lat = cfg.col_min_lat
+    col_max_lat = cfg.col_max_lat
+    col_min_lon = cfg.col_min_lon
+    col_max_lon = cfg.col_max_lon
 
     #Calculating grid distances and areas
     _,_,grid_cell_area,grid_spacing = calc_grid_distance_area(Lat,Lon)
     grid_cell_area[grid_cell_area < 0] = 0
-    
-
-    start_day = times[0]
-
-    # connect over date line?
-    crosses_dateline = False
-    if (Lon[0, 0] < -176) & (Lon[0, -1] > 176):
-        crosses_dateline = True
 
     #Check if cyclone is a cut-off low
+    cy_z500_objects = split_objects(cy_z500_objects, distance_threshold = int(MaxDistCYFeatures/grid_spacing))
 
     object_indices_low = ndimage.find_objects(cy_z500_objects.astype(int))
+        
     col_objects = np.zeros(cy_z500_objects.shape,dtype=int)
 
-    for iobj,_ in enumerate(object_indices_low):
+    y_size = Lat.shape[0]
+    x_size = Lon.shape[1]
+    
+    front_objects = Front_tracking(u850_data,
+                                   v850_data,
+                                   t850_data,
+                                   times,
+                                   Lon,
+                                   Lat)
+    
+    for iobj in range(len(object_indices_low)):
             
         if object_indices_low[iobj] is None:
             continue
         
+        obj_act = cy_z500_objects[object_indices_low[iobj]] == iobj + 1
+        if obj_act.shape[0] < col_min_dur/DT:
+            #print('object too short')
+            continue
+
+
+        
+
         time_start = object_indices_low[iobj][0].start
         time_stop = object_indices_low[iobj][0].stop
         lat_start  = object_indices_low[iobj][1].start - int(col_buffer/grid_spacing)
@@ -1010,121 +1158,280 @@ def COLtracking(cy_z500_objects,
         lon_start  = object_indices_low[iobj][2].start - int(col_buffer/grid_spacing)
         lon_stop   = object_indices_low[iobj][2].stop + int(col_buffer/grid_spacing)
 
+       
+
+
+        if lat_start < 0:
+            lat_start = 0
+        if lon_start < 0:
+            lon_start = 0
+        if lat_stop > z500_data.shape[1]:
+            lat_stop = z500_data.shape[1]
+        if lon_stop > z500_data.shape[2]:
+            lon_stop = z500_data.shape[2]
+            
+
         z500_slice = z500_data[time_start:time_stop,lat_start:lat_stop,lon_start:lon_stop]
         u200_slice = u200_data[time_start:time_stop,lat_start:lat_stop,lon_start:lon_stop]
-        object_slice = nc.copy(cy_z500_objects[time_start:time_stop,lat_start:lat_stop,lon_start:lon_stop])
-        #front_ob = frontal_diag[time_start:time_stop,lat_start:lat_stop,lon_start:lon_stop]
+        object_slice = np.copy(cy_z500_objects[time_start:time_stop,lat_start:lat_stop,lon_start:lon_stop])==iobj+1
+        front_slice = front_objects[time_start:time_stop,lat_start:lat_stop,lon_start:lon_stop]
         lat_slice = Lat[lat_start:lat_stop,lon_start:lon_stop]
         lon_slice = Lon[lat_start:lat_stop,lon_start:lon_stop]
-        # connect objects over date line
-        if crosses_dateline:
-            object_slice = ConnectLon(object_slice)
-            #THIS NEEDS TO BE FIXED FOR OTHER VARIABLES TOO (using np.roll, see original)
-      
+        
 
         # find location of z500 minimum
-        z500_slice_nan = np.copy(z500_slice)
-        z500_slice_nan[z500_slice_nan == 0] = np.nan
+        z500_slice_obj = np.copy(z500_slice)
+        z500_slice_obj[object_slice == 0] = np.nan
+        
 
-        for tt in range(z500_slice_nan.shape[0]):
-            min_loc = np.nanargmin(z500_slice_nan[tt,:,:])
-            min_la = np.unravel_index(min_loc, z500_slice_nan[tt,:,:].shape)[0][0]
-            min_lo = np.unravel_index(min_loc, z500_slice_nan[tt,:,:].shape)[1][0]
+        logging.debug(f"{Fore.GREEN} Cyclone {iobj+1} starts at {times[time_start].strftime('%Y-%m-%d %HUTC')}")
+        for tt in range(z500_slice_obj.shape[0]):
+            
+            if np.isnan(z500_slice_obj[tt]).all():
+                #no object to process
+                logging.debug(f"{Fore.YELLOW} Cyclone {iobj+1} at {times[time_start+tt].strftime('%Y-%m-%d %HUTC')} is not COL because there is no object")
+                object_slice[tt,:,:] = 0
+                continue
+            min_loc = np.nanargmin(z500_slice_obj[tt,:,:])      
+            min_la = np.unravel_index(min_loc, z500_slice_obj[tt,:,:].shape)[0]
+            min_lo = np.unravel_index(min_loc, z500_slice_obj[tt,:,:].shape)[1]
 
             la0 = min_la - int(col_buffer/grid_spacing)
             lo0 = min_lo - int(col_buffer/grid_spacing)
             la1 = min_la + int(col_buffer/grid_spacing) + 1
             lo1 = min_lo + int(col_buffer/grid_spacing) + 1
 
+
             if la0 < 0:
                 la0 = 0
             if lo0 < 0:
                 lo0 = 0
             
-            if la1 > z500_slice_nan.shape[1]:   
-                la1 = z500_slice_nan.shape[1]
+            if la1 > z500_slice_obj.shape[1]:   
+                la1 = z500_slice_obj.shape[1]
             
-            if lo1 > z500_slice_nan.shape[2]:
-                lo1 = z500_slice_nan.shape[2]
+            if lo1 > z500_slice_obj.shape[2]:
+                lo1 = z500_slice_obj.shape[2]
+                
+            
             
             lat_reg = lat_slice[la0:la1,lo0:lo1]
             lon_reg = lon_slice[la0:la1,lo0:lo1]
 
             z500_reg = z500_slice[tt,la0:la1,lo0:lo1]
             u200_reg = u200_slice[tt,la0:la1,lo0:lo1]
+            z500_reg_obj= z500_slice_obj[tt,la0:la1,lo0:lo1]
             object_reg = object_slice[tt,la0:la1,lo0:lo1]
-            #front_reg = front_ob[tt,la0:la1,lo0:lo1]
-            #min_obj = object_reg[min_la,min_lo]
-            min_z500_obj = z500_reg[min_la,min_lo]
+            front_reg = front_slice[tt,la0:la1,lo0:lo1]
+            min_z500_obj = z500_slice[tt,min_la,min_lo]
 
             #Check if radius around center has higher Z
-            min_loc_tt = np.nanargmin(object_reg)
-            min_la_tt = np.unravel_index(min_loc, object_reg.shape)[0][0]
-            min_lo_tt = np.unravel_index(min_loc, object_reg.shape)[1][0]
-
-            rdist = haversine(lat_reg[min_la_tt,min_lo_tt],lon_reg[min_la_tt,min_lo_tt],lon_reg,lat_reg)
+            min_loc_tt = np.nanargmin(z500_reg_obj)
+            min_la_tt = np.unravel_index(min_loc_tt, z500_reg_obj.shape)[0]
+            min_lo_tt = np.unravel_index(min_loc_tt, z500_reg_obj.shape)[1]
+            
 
             # COL should only occure between 20 and 70 degrees
             # https://journals.ametsoc.org/view/journals/clim/33/6/jcli-d-19-0497.1.xml
             if (abs(lat_reg[min_la_tt,min_lo_tt]) < 20) | (abs(lat_reg[min_la_tt,min_lo_tt]) > 70):
-                object_reg[tt,:,:] = 0
+                logging.debug(f"{Fore.YELLOW}Cyclone {iobj+1} at {times[time_start+tt].strftime('%Y-%m-%d %HUTC')} is not COL because of latitude (not in 20-70)")
+                object_slice[tt,:,:] = 0
                 continue 
 
                         # remove cyclones that are close to the poles
             if np.max(np.abs(lat_reg)) > 88:
-                object_reg[tt,:,:] = 0
+                logging.debug(f"{Fore.YELLOW}Cyclone {iobj+1} at {times[time_start+tt].strftime('%Y-%m-%d %HUTC')} is not COL because it is too close to the poles")
+                object_slice[tt,:,:] = 0
                 continue
 
-            if (~np.isnan(z500_slice_nan[tt])).sum == 0:
+            if ((np.max(lat_reg[object_reg[:,:] == 1]) > col_max_lat) | (np.min(lat_reg[object_reg[:,:] == 1]) < col_min_lat) |
+               (np.max(lon_reg[object_reg[:,:] == 1]) > col_max_lon) | (np.min(lon_reg[object_reg[:,:] == 1]) < col_min_lon)):
+                logging.debug(f"{Fore.YELLOW}Cyclone {iobj+1} at {times[time_start+tt].strftime('%Y-%m-%d %HUTC')} is not COL because it is too far north or south (or next to the border)")
+                object_slice[tt,:,:] = 0
+                continue
+
+            if (~np.isnan(z500_slice_obj[tt])).sum == 0:
                 #no object to process
-                object_reg[tt,:,:] = 0
+                object_slice[tt,:,:] = 0
                 continue
 
-        #CRITERIA 1) at least 75 % of grid cells in ring have have 10 m higher Z than center
 
-        ring = (rdist >= (350 - (grid_spacing/1000.)*2))  & (rdist <= (350 + (grid_spacing/1000.)*2))
-        if np.sum((min_z500_obj - z500_reg[ring]) < -10) < np.sum(ring)*0.75:
-                object_reg[tt,:,:] = 0
+            #CRITERIA 1) at least col_percent_isolation*100 % of grid cells in ring have have 100 m higher Z than center
+            
+            rdist = haversine(lat_reg[min_la_tt,min_lo_tt],lon_reg[min_la_tt,min_lo_tt],lat_reg,lon_reg)
+    
+            ring = (rdist >= (col_ring_isolation - (grid_spacing)*2))  & (rdist <= (col_ring_isolation + (grid_spacing)*2))
+            if np.sum((z500_reg[ring] - min_z500_obj) > col_thres_isolation) < np.sum(ring)*col_percent_isolation:
+                    object_slice[tt,:,:] = 0
+                    continue
+            
+            # CRITERIA 2) check if 200 hPa wind speed is eastward in the poleward direction of the cyclone
+            if lat_reg[min_la_tt,min_lo_tt]>0:
+                east_flow = u200_reg [0:min_la_tt,min_lo_tt]
+            else:
+                east_flow = u200_reg [min_la_tt:-1,min_lo_tt]
+
+    
+            if (east_flow.shape[0]!=0):
+                if (np.min(east_flow) > 0):
+                    logging.debug(f"{Fore.YELLOW}Cyclone {iobj+1} at {times[time_start+tt].strftime('%Y-%m-%d %HUTC')} is not COL because of eastward flow")
+                    object_slice[tt,:,:] = 0
+                    continue
+            elif (east_flow.shape[0]==0):
+                logging.debug(f"{Fore.YELLOW}Cyclone {iobj+1} at {times[time_start+tt].strftime('%Y-%m-%d %HUTC')} is not COL because of eastward flow, too close to upper boundary")
+                object_slice[tt,:,:] = 0
                 continue
-        
-        # CRITERIA 2) check if 200 hPa wind speed is eastward in the poleward direction of the cyclone
 
-        if lat_reg[min_la_tt,min_lo_tt]>0:
-            east_flow = u200_reg [min_la_tt:-1,min_lo_tt]
-        else:
-            east_flow = u200_reg [0:min_la_tt,min_lo_tt]
 
-        if np.min(east_flow) > 0:
-            object_reg[tt,:,:] = 0
+            # CRITERIA 3) check if there is a front in the region
+           
+            # front_test = np.sum(np.abs(front_reg[:, min_lo_tt:]) > 1)
+            # if front_test < 1:
+            #     logging.debug(f'{Fore.YELLOW}yclone {iobj+1} at {tt} is not COL because of no front to the east')
+            #     object_slice[tt,:,:] = 0
+            #     continue
+            if (min_z500_obj/const.g) > col_z500_threshold_min:
+                logging.debug(f"{Fore.YELLOW}Cyclone {iobj+1} at {times[time_start+tt].strftime('%Y-%m-%d %HUTC')} is not COL because of z500 threshold (not deep enough)")
+                object_slice[tt,:,:] = 0
+                continue
+
+
+            # CRITERIA 4) Check if system is within region
+            obj_mass_center = ndimage.measurements.center_of_mass(object_slice[tt,:,:])
+            obj_track_lat=lat_slice[int(round(obj_mass_center[0])),int(round(obj_mass_center[1]))]    
+            obj_track_lon=lon_slice[int(round(obj_mass_center[0])),int(round(obj_mass_center[1]))]   
+            # if iobj == 525: import pdb; pdb.set_trace()  # fmt: skip
+            if (obj_track_lat < col_region[2] or 
+                obj_track_lat > col_region[3] or 
+                obj_track_lon < col_region [0] or 
+                obj_track_lon > col_region[1]):
+                logging.debug(f"{Fore.YELLOW}Cyclone {iobj+1} at {times[time_start+tt].strftime('%Y-%m-%d %HUTC')} is not COL because it is outside {col_region}")
+
+                object_slice[tt,:,:] = 0
+                continue
+
+            # # CRITERIA 5) Check if system is not too close to borders (not closed system)
+            if lat_start == 0 or lat_stop == y_size or lon_start == 0 or lon_stop == x_size:
+                logging.debug(f"{Fore.YELLOW}Cyclone {iobj+1} at {times[time_start+tt].strftime('%Y-%m-%d %HUTC')} is not COL because it is too close to the border")
+                object_slice[tt,:,:] = 0
+                continue 
+
+        # CRITERIA 6) Remove objects that are too short after all checks
+        if (object_slice.sum(axis=(0,1))>0).sum() < col_min_dur/DT:
+            logging.debug(f"{Fore.YELLOW}Cyclone {iobj+1} is not COL because it is too short after all other criteria applied")
             continue
+        else:
+            logging.debug(f"{Fore.GREEN}Cyclone {iobj+1} at {times[time_start+tt].strftime('%Y-%m-%d %HUTC')} is a COL")
+            
+        object_slice = object_slice.astype(int)
+        object_slice[object_slice > 0] = iobj + 1
+        object_slice= object_slice + col_objects[time_start:time_stop,lat_start:lat_stop,lon_start:lon_stop]
+        col_objects[time_start:time_stop,lat_start:lat_stop,lon_start:lon_stop] = object_slice
+        
+    #Number of col_objects identified
+    col_objects_ids = np.unique(col_objects)
+    col_objects_ids = col_objects_ids[col_objects_ids > 0]
+    logging.debug(f"{Fore.GREEN} {col_objects_ids.size} Cut-off lows found")
 
-        # CRITERIA 3) check if there is a front in the region
-        if frontal_diag is not None:
-            front_test = np.sum(np.abs(front_reg[:, min_lo_tt:]) > 1)
-            if front_test < 1:
-                object_reg[tt,:,:] = 0
-                continue
 
-        object_reg = object_reg.astype(int)
-        object_reg[object_reg > 0] = iobj + 1
-        object_reg = object_reg + col_objects[time_start:time_stop,lat_start:lat_stop,lon_start:lon_stop]
-        col_objects[time_start:time_stop,lat_start:lat_stop,lon_start:lon_stop] = object_reg
 
-        if nc_file is not None:
-            logging.debug (f'{Style.BRIGHT} Save objects into a netCDF')
+    ## Searching for Cut-Off lows within area:
+    #Calcualate the center of mass of the cyclone
+    
+    # new_labels = relabel_to_consecutive(col_objects)
+    
+    # new_labels_ind = ndimage.find_objects(new_labels)
 
-            fino=xr.Dataset({'cy_z500_objects':(['time','y','x'],cy_z500_objects),
-                             'col_objects':(['time','y','x'],col_objects),
-                             'z500':(['time','y','x'],z500_data),
-                             'u200':(['time','y','x'],u200_data),
-                             'lat':(['y','x'],Lat),
-                            'lon':(['y','x'],Lon)},
-                                coords={'time':times.values})
+    # col_objects_new = np.zeros(new_labels.shape,dtype=int)
 
-            fino.to_netcdf(nc_file,mode='w',encoding={'z500':{'zlib': True,'complevel': 5},
-                                                  'u200':{'zlib': True,'complevel': 5},
-                                                'cy_z500_objects':{'zlib': True,'complevel': 5},
-                                                'col_objects':{'zlib': True,'complevel': 5}})
+    # new_labels = np.copy(col_objects)
+    # new_labels_ind = ndimage.find_objects(new_labels)
+    # col_objects_new = np.zeros(new_labels.shape,dtype=int)
+
+    # for nobj in range(len(new_labels_ind)):
+    #     print(nobj)
+
+        
+    #     object_slice = np.copy(new_labels[new_labels_ind[nobj]])==nobj+1
+
+    #     if object_slice.shape[0]< col_min_dur/DT:
+    #         continue
+
+    #     lat_slice = np.copy(Lat[new_labels_ind[nobj][1:]])
+    #     lon_slice = np.copy(Lon[new_labels_ind[nobj][1:]])
+    #     obj_mass_center = np.array([ndimage.measurements.center_of_mass(object_slice[tstep,:,:]) for tstep in range(object_slice.shape[0])])
+    #     if np.all(np.isnan(obj_mass_center)):
+    #         import pdb; pdb.set_trace()  # fmt: skip
+    #         continue
+
+    #     obj_mass_center = obj_mass_center[~np.isnan(obj_mass_center).any(axis=1)]
+    #     obj_track = np.full([len(obj_mass_center), 2], np.nan)
+    #     try:
+    #         obj_track[:,0]=np.array([lat_slice[int(round(obj_loc[0])),int(round(obj_loc[1]))]    for tstep, obj_loc in enumerate(obj_mass_center)])
+    #         obj_track[:,1]=np.array([lon_slice[int(round(obj_loc[0])),int(round(obj_loc[1]))]    for tstep, obj_loc in enumerate(obj_mass_center)])
+    #     except:
+    #         import pdb; pdb.set_trace()
+
+    #     track_in_region = np.asarray([(obj_track[tstep, 0] > col_region[2] and obj_track[tstep, 0] < col_region[3] and 
+    #          obj_track[tstep, 1] > col_region[0] and obj_track[tstep, 1] < col_region[1]) 
+    #         for tstep in range(obj_track.shape[0])])
+        
+
+
+
+    #     if track_in_region.sum() == 0:
+    #         logging.debug(f'{Fore.YELLOW}Cyclone {nobj+1} outside region of interest {col_region}')
+    #         continue
+    #     else:
+    #         logging.debug(f'{Fore.GREEN}Cyclone {nobj+1} inside region of interest {col_region}')
+    #         print(obj_track)
+    #         import pdb; pdb.set_trace()  # fmt: skip
+    #         col_objects_new[new_labels==nobj+1] = nobj+1
+
+    
+    #new_labels2 = relabel_to_consecutive(col_objects_new)
+
+
+    if nc_file is not None:
+        logging.debug (f'{Style.BRIGHT} Save objects into a netCDF')
+        
+        
+        
+
+        
+        fino=xr.Dataset({'cy_z500_objects':(['time','latitude','longitude'],cy_z500_objects),
+                            'col_objects':(['time','latitude','longitude'],col_objects),
+                            'front_objects':(['time','latitude','longitude'],front_objects),
+                            'z500':(['time','latitude','longitude'],z500_data),
+                            'u200':(['time','latitude','longitude'],u200_data),
+                            't850':(['time','latitude','longitude'],t850_data),
+                            'u850':(['time','latitude','longitude'],u850_data),
+                            'v850':(['time','latitude','longitude'],v850_data),
+                            'pr':(['time','latitude','longitude'],pr_data),
+                            'pr_max':(['time','latitude','longitude'],pr_data_max)
+                            },
+                            coords={'time':times.values,'latitude':Lat[:,0].squeeze(),'longitude':Lon[0,:].squeeze()})
+        
+        # Adding units to 'pr' and 'pr_max'
+        fino['pr'].attrs['units'] = 'mm'  
+        fino['pr_max'].attrs['units'] = 'mm/hr'  
+
+        # Optionally, you can add a description or other metadata
+        fino['pr'].attrs['description'] = 'Accumulated Precipitation'
+        fino['pr_max'].attrs['description'] = 'Maximum precipitation rate'
+
+        reference_date = np.datetime64("1940-01-01T00:00:00")
+        fino['time'] = (fino['time'] - reference_date) / np.timedelta64(1, 'h')
+        fino['time'].attrs['units'] = f"hours since {reference_date}"
+        fino['time'].attrs['calendar'] = 'standard'
+
+
+        fino.to_netcdf(nc_file,mode='w',
+                        format="NETCDF4",
+                        encoding={'z500':{'zlib': True,'complevel': 5},
+                                            'u200':{'zlib': True,'complevel': 5},
+                                            'cy_z500_objects':{'zlib': True,'complevel': 5},
+                                            'col_objects':{'zlib': True,'complevel': 5}})
 
 
         end_time = time.time()
