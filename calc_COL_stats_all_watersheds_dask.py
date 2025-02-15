@@ -33,7 +33,7 @@ def main():
     # Process each low-res file (one per year) separately
     for lowres_file in lowres_files:
         # Extract the year from the low-res filename.
-        # Assuming filenames like: era5_daily_col_z500_1970.nc
+        # e.g., "era5_daily_col_z500_1970.nc" -> "1970"
         year = lowres_file.split('_')[-1].split('.')[0]
         print(f"\nProcessing year: {year}")
         
@@ -62,11 +62,11 @@ def main():
             ds_pr = xr.open_mfdataset(matching_highres, combine='by_coords',
                                       chunks={'time': -1, 'latitude': 261, 'longitude': 201})
             # Resample high-res precipitation to 6-hourly:
-            # ds_6h_max: maximum (instantaneous) rainfall per 6H period
+            # ds_6h_max: instantaneous (max) rainfall per 6H period
             ds_6h_max = ds_pr.resample(valid_time='6H').max()
-            # ds_6h_sum: accumulated rainfall over each 6H period (sum)
+            # ds_6h_sum: accumulated rainfall (sum) over each 6H period
             ds_6h_sum = ds_pr.resample(valid_time='6H').sum()
-            # Interpolate the watershed mask to the high-res grid (using nearest neighbor)
+            # Interpolate the watershed mask to the hi-res grid (using nearest neighbor)
             ws_mask_hires = ws_mask.interp(latitude=ds_6h_max.latitude, longitude=ds_6h_max.longitude, method='nearest')
         
         # Check that required variables exist in the low-res dataset
@@ -92,6 +92,11 @@ def main():
             pr_obj = pr_max.where(mask_obj, drop=True).compute()
             if pr_obj.size == 0:
                 continue
+
+            # Find the global maximum and its location
+            # (time, latitude, longitude) of the global maximum
+            # (and its value) in the object's data
+            # Also, find the watershed of the global maximum
             max_val = pr_obj.max().item()
             flat_index = int(np.nanargmax(pr_obj.values))
             time_idx, lat_idx, lon_idx = np.unravel_index(flat_index, pr_obj.shape)
@@ -114,25 +119,25 @@ def main():
                         ws_max_val = None
                     ws_max[ws_name] = ws_max_val
     
-            # Process hi-res data only if available; otherwise, set hi-res values to None.
+            # Process hi-res data if available; otherwise, set hi-res values to None.
             if ds_6h_max is None or ds_6h_sum is None:
                 ws_max_hires = {ws_name: None for ws_name in watersheds.keys()}
-                ws_sum_hires = {ws_name: None for ws_name in watersheds.keys()}
-                max_accum_hires = None
+                ws_total_hires = {ws_name: None for ws_name in watersheds.keys()}
             else:
                 # Determine time period when the object exists (from low-res col_objects)
                 time_mask = (col_objs == obj).any(dim=['latitude', 'longitude'])
+                
                 time_indices = np.where(time_mask.values)[0]
                 if len(time_indices) == 0:
                     pr_obj_hires_max = None
                     pr_obj_hires_sum = None
                 else:
-                    # Restrict the high-res instantaneous (max) precipitation to the object's time period
+                    # Restrict the hi-res instantaneous (max) precipitation to the object's time period
                     pr_obj_hires_max = ds_6h_max.tp.isel(valid_time=time_indices).compute()
-                    # Restrict the high-res accumulated precipitation (sum) to the object's time period
+                    # Restrict the hi-res accumulated (sum) precipitation to the object's time period
                     pr_obj_hires_sum = ds_6h_sum.tp.isel(valid_time=time_indices).compute()
     
-                # For hi-res instantaneous (max) data, compute per-watershed maximum
+                # For hi-res instantaneous (max) data, compute per-watershed maximum (converted to mm)
                 ws_max_hires = {}
                 if pr_obj_hires_max is None or pr_obj_hires_max.size == 0:
                     for ws_name in watersheds.keys():
@@ -147,66 +152,105 @@ def main():
                                 ws_max_val_hires = pr_obj_ws_hires.max().item()
                             except Exception:
                                 ws_max_val_hires = None
-                            # Optionally, convert to mm (e.g., multiply by 1000)
                             ws_max_hires[ws_name] = ws_max_val_hires * 1000 if ws_max_val_hires is not None else None
     
-                # For hi-res accumulated (sum) data, compute global and per-watershed maximum accumulation.
+                # For hi-res accumulated (sum) data, compute total (accumulated) precipitation per watershed (converted to mm)
+                ws_total_hires = {}
                 if pr_obj_hires_sum is None or pr_obj_hires_sum.size == 0:
-                    max_accum_hires = None
-                    ws_sum_hires = {ws_name: None for ws_name in watersheds.keys()}
+                    for ws_name in watersheds.keys():
+                        ws_total_hires[ws_name] = None
                 else:
-                    max_accum_hires = pr_obj_hires_sum.max().item() * 1000  # conversion to mm if needed
-                    ws_sum_hires = {}
                     for ws_name, ws_id in watersheds.items():
                         pr_obj_ws_hires_sum = pr_obj_hires_sum.where(ws_mask_hires['region_mask'] == ws_id, drop=True)
                         if pr_obj_ws_hires_sum.size == 0:
-                            ws_sum_hires[ws_name] = None
+                            ws_total_hires[ws_name] = None
                         else:
                             try:
-                                ws_sum_val_hires = pr_obj_ws_hires_sum.max().item() * 1000
+                                total_val = pr_obj_ws_hires_sum.mean(dim=['latitude','longitude']).sum(dim='valid_time').item()
                             except Exception:
-                                ws_sum_val_hires = None
-                            ws_sum_hires[ws_name] = ws_sum_val_hires
+                                total_val = None
+                            ws_total_hires[ws_name] = total_val * 1000 if total_val is not None else None
+    
+            # Extract event month for reference (if needed)
+            event_month = str(pd.to_datetime(str(time_val)).to_period('M'))
     
             # Redefine object id as "objectid_year"
             new_obj_id = f"{obj}_{year}"
             all_results.append({
                 'object_id': new_obj_id,
                 'year': year,
+                'event_month': event_month,
                 'max_pr': max_val,           # global maximum from low-res
                 'time': time_val,
                 'latitude': lat_val,
                 'longitude': lon_val,
                 'watershed': watershed_name,
                 'ws_max': ws_max,            # per-watershed maximum from original low-res data
-                'ws_max_hires': ws_max_hires,  # per-watershed maximum (instantaneous hi-res)
-                'max_accum_hires': max_accum_hires,  # global maximum accumulated (hi-res)
-                'ws_sum_hires': ws_sum_hires      # per-watershed maximum accumulated (hi-res)
+                'ws_max_hires': ws_max_hires,  # per-watershed instantaneous hi-res (max) precipitation
+                'ws_total_hires': ws_total_hires  # per-watershed total (accumulated) hi-res precipitation (wpr_trends)
             })
     
         ds.close()
         if ds_pr is not None:
             ds_pr.close()
     
-    # Combine results from all years into one DataFrame
-    df = pd.DataFrame(all_results)
+    # Combine event-level results from all years into one DataFrame and save to CSV
+    df_events = pd.DataFrame(all_results)
+    df_events.to_csv('object_results_events.csv', index=False)
+    print("\nEvent-level results saved to 'object_results_events.csv'")
+    print(df_events.head())
     
-    # Optionally, expand the hi-res dictionary columns into a MultiIndex DataFrame:
-    # Expand ws_max_hires:
-    if not df.empty and df['ws_max_hires'].notnull().all():
-        df_hi_max = pd.json_normalize(df['ws_max_hires'])
-        df_hi_max.columns = pd.MultiIndex.from_product([['hi_res'], ['max'], df_hi_max.columns])
-        # Expand ws_sum_hires:
-        df_hi_sum = pd.json_normalize(df['ws_sum_hires'])
-        df_hi_sum.columns = pd.MultiIndex.from_product([['hi_res'], ['sum'], df_hi_sum.columns])
-        # Drop original dictionary columns and join the new ones.
-        df = df.drop(columns=['ws_max_hires','ws_sum_hires'])
-        df = df.join(df_hi_max).join(df_hi_sum)
+    # --- Now aggregate yearly trends for both low-res and hi-res ---
+    # For low-res, we use:
+    #   - Global low-res: max_pr (global maximum for event)
+    #   - Per-watershed low-res: ws_max (instantaneous values)
+    # For hi-res, we use:
+    #   - Per-watershed hi-res instantaneous: ws_max_hires
+    #   - Per-watershed hi-res accumulated: ws_total_hires
+    # Also, count the number of COL events per year.
     
-    csv_file = 'object_results.csv'
-    df.to_csv(csv_file, index=False)
-    print("\nResults DataFrame saved to '{}'".format(csv_file))
-    print(df)
+    df_events['event_count'] = 1
+    df_events['year'] = df_events['year'].astype(str)
+    
+    # --- Low-res Aggregation ---
+    # Global low-res metrics
+    agg_global = df_events.groupby('year').agg({'max_pr': ['max', 'mean']})
+    agg_global.columns = ['global_lowres_max', 'global_lowres_mean']
+    
+    # Per-watershed low-res: normalize ws_max dictionary
+    df_lowres = pd.json_normalize(df_events['ws_max'])
+    df_lowres.columns = [f"lpr_max_{col}" for col in df_lowres.columns]
+    df_lowres['year'] = df_events['year'].values
+    agg_lowres = df_lowres.groupby('year').agg({col: ['max', 'mean'] for col in df_lowres.columns if col != 'year'})
+    agg_lowres.columns = ['_'.join(col).strip() for col in agg_lowres.columns.values]
+    
+    # --- Hi-res Aggregation ---
+    # Per-watershed hi-res instantaneous (ws_max_hires)
+    df_hires_max = pd.json_normalize(df_events['ws_max_hires'])
+    df_hires_max.columns = [f"wpr_max_{col}" for col in df_hires_max.columns]
+    df_hires_max['year'] = df_events['year'].values
+    agg_hires_max = df_hires_max.groupby('year').agg({col: ['max', 'mean'] for col in df_hires_max.columns if col != 'year'})
+    agg_hires_max.columns = ['_'.join(col).strip() for col in agg_hires_max.columns.values]
+    
+    # Per-watershed hi-res accumulated (ws_total_hires)
+    df_hires_sum = pd.json_normalize(df_events['ws_total_hires'])
+    df_hires_sum.columns = [f"wpr_trends_{col}" for col in df_hires_sum.columns]
+    df_hires_sum['year'] = df_events['year'].values
+    agg_hires_sum = df_hires_sum.groupby('year').agg({col: 'sum' for col in df_hires_sum.columns if col != 'year'})
+    
+    # Number of events per year
+    event_count = df_events.groupby('year').agg({'event_count': 'sum'})
+    
+    # Combine all aggregated data
+    df_yearly = agg_global.join(agg_lowres, how='outer')
+    df_yearly = df_yearly.join(agg_hires_max, how='outer')
+    df_yearly = df_yearly.join(agg_hires_sum, how='outer')
+    df_yearly = df_yearly.join(event_count, how='outer')
+    df_yearly = df_yearly.reset_index()
+    
+    df_yearly.to_csv('object_results_yearly_trends.csv', index=False)
+    print("\nYearly aggregated trends (low-res & hi-res) saved to 'object_results_yearly_trends.csv'")
+    print(df_yearly.head())
 
 if __name__ == '__main__':
     main()
