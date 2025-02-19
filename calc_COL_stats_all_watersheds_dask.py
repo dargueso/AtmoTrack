@@ -29,9 +29,6 @@ def main():
     watersheds = {'CAT': 22, 'EBR': 23, 'JUC': 16, 'BAL': 8,
                   'SEG': 7, 'SUR': 21, 'MED': 25}
     
-    num_points_ws = {}
-    for ws in watersheds.keys():
-        num_points_ws[ws] = (ws_mask==watersheds[ws]).region_mask.sum().item()
 
     all_results = []
     
@@ -65,19 +62,25 @@ def main():
         else:
             # Open all matching high-res files for the year as one dataset
             ds_pr = xr.open_mfdataset(matching_highres, combine='by_coords',
-                                      chunks={'time': -1, 'latitude': 651, 'longitude': 501})
+                                      chunks={'valid_time': -1, 'latitude': 651, 'longitude': 501})
+            #Deacumulate every hour at 24h steps
+
+
+            time_at_00 = ds_pr.valid_time.dt.hour == 0
+            tp = ds_pr['tp']
+            hourly_precip = tp.copy()
+            hourly_precip[1:,:,:] = tp.diff(dim='valid_time', n=1)
+            hourly_precip = hourly_precip.where(~time_at_00, tp)
+
+
             # Resample high-res precipitation to 6-hourly:
             # ds_6h_max: instantaneous (max) rainfall per 6H period
-            ds_6h_max = ds_pr.resample(valid_time='6H').max()
+            ds_6h_max = hourly_precip.resample(valid_time='6h').max()
             # ds_6h_sum: accumulated rainfall (sum) over each 6H period
-            ds_6h_sum = ds_pr.resample(valid_time='6H').sum()
+            ds_6h_sum = hourly_precip.resample(valid_time='6h').sum()
             # Interpolate the watershed mask to the hi-res grid (using nearest neighbor)
             ws_mask_hires = ws_mask.interp(latitude=ds_6h_max.latitude, longitude=ds_6h_max.longitude, method='nearest')
         
-            num_points_ws_hires = {}
-            for ws in watersheds.keys():
-                num_points_ws_hires[ws] = (ws_mask_hires==watersheds[ws]).region_mask.sum().item()
-            
 
         # Check that required variables exist in the low-res dataset
         if 'col_objects' not in ds or 'pr_max' not in ds:
@@ -103,11 +106,10 @@ def main():
             # mask_obj = (col_objs == obj)
             time_mask = (col_objs == obj).any(dim=['latitude', 'longitude'])
             time_true = np.where(time_mask.values)[0]
-
-
    
             # Create an extended time index that spans from the first to the last occurrence.
             extended_time_indices = np.arange(time_true[0], time_true[-1] + 1)
+            
             if extended_time_indices.size < cfg.col_min_dur/cfg.DT:
                 continue
             # Extract precipitation data for the entire domain for all time steps between first and last occurrence.
@@ -144,13 +146,13 @@ def main():
                 else:
                     try:
                         ws_max_val = pr_period_max_ws.max().item()
-                        ws_sum_val = pr_period_sum_ws.sum().item()
+                        ws_sum_val = pr_period_sum_ws.mean(dim=['latitude','longitude']).sum().item()
                     except Exception:
                         ws_max_val = None
                         ws_sum_val = None
                     ws_max_lores[ws_name] = ws_max_val
-                    ws_sum_lores[ws_name] = ws_sum_val/num_points_ws[ws]
-    
+                    ws_sum_lores[ws_name] = ws_sum_val
+
 
             # Process hi-res data if available; otherwise, set hi-res values to None.
             if ds_6h_max is None or ds_6h_sum is None:
@@ -163,9 +165,9 @@ def main():
                     pr_obj_hires_sum = None
                 else:
                     # Restrict the hi-res instantaneous (max) precipitation to the object's time period
-                    pr_obj_hires_max = ds_6h_max.tp.isel(valid_time=extended_time_indices).compute()
+                    pr_obj_hires_max = ds_6h_max.isel(valid_time=extended_time_indices).compute()
                     # Restrict the hi-res accumulated (sum) precipitation to the object's time period
-                    pr_obj_hires_sum = ds_6h_sum.tp.isel(valid_time=extended_time_indices).compute()
+                    pr_obj_hires_sum = ds_6h_sum.isel(valid_time=extended_time_indices).compute()
     
                 # For hi-res instantaneous (max) data, compute per-watershed maximum (converted to mm)
                 ws_max_hires = {}
@@ -196,10 +198,10 @@ def main():
                             ws_sum_hires[ws_name] = None
                         else:
                             try:
-                                ws_sum_val_hires = pr_period_max_ws_hires_sum.sum().item()
+                                ws_sum_val_hires = pr_period_max_ws_hires_sum.mean(dim=['latitude','longitude']).sum().item()
                             except Exception:
                                 ws_sum_val_hires = None
-                            ws_sum_hires[ws_name] = ws_sum_val_hires/num_points_ws_hires[ws] * 1000 if ws_sum_val_hires is not None else None
+                            ws_sum_hires[ws_name] = ws_sum_val_hires * 1000 if ws_sum_val_hires is not None else None
     
             # Extract event month for reference (if needed)
             month = pd.to_datetime(str(time_val)).strftime('%m')
