@@ -1317,7 +1317,15 @@ def COL_tracking(cy_z500_objects,
                 continue 
 
         # CRITERIA 6) Remove objects that are too short after all checks
-        if (object_slice.sum(axis=(0,1))>0).sum() < col_min_dur/DT:
+        obj_life = object_slice.sum(axis=(1,2))>0
+        obj_life_true = np.where(obj_life)[0]
+
+        if obj_life_true.size == 0:
+            continue
+        else:
+            extended_obj_life = np.arange(obj_life_true[0], obj_life_true[-1] + 1)
+
+        if extended_obj_life.size < col_min_dur/DT:
             logging.debug(f"{Fore.YELLOW}Cyclone {iobj+1} is not COL because it is too short after all other criteria applied")
             continue
         else:
