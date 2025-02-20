@@ -63,7 +63,7 @@ def main():
     """
     #start_logger_if_necessary()
     filesin = sorted(
-            glob(f"./era5_daily_500hPa_2024.nc")
+            glob(f"./data_era5/era5_daily_500hPa_????.nc")
     )
 
     Parallel(n_jobs=1)(delayed(cutofflow_tracking)(fin_name) for fin_name in filesin)
