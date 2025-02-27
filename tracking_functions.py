@@ -1137,7 +1137,7 @@ def COL_tracking(cy_z500_objects,
                                    times,
                                    Lon,
                                    Lat)
-    
+
     for iobj in range(len(object_indices_low)):
             
         if object_indices_low[iobj] is None:
@@ -1178,7 +1178,6 @@ def COL_tracking(cy_z500_objects,
         lat_slice = Lat[lat_start:lat_stop,lon_start:lon_stop]
         lon_slice = Lon[lat_start:lat_stop,lon_start:lon_stop]
         
-
         # find location of z500 minimum
         z500_slice_obj = np.copy(z500_slice)
         z500_slice_obj[object_slice == 0] = np.nan
@@ -1230,7 +1229,6 @@ def COL_tracking(cy_z500_objects,
             min_la_tt = np.unravel_index(min_loc_tt, z500_reg_obj.shape)[0]
             min_lo_tt = np.unravel_index(min_loc_tt, z500_reg_obj.shape)[1]
             
-
             # COL should only occure between 20 and 70 degrees
             # https://journals.ametsoc.org/view/journals/clim/33/6/jcli-d-19-0497.1.xml
             if (abs(lat_reg[min_la_tt,min_lo_tt]) < 20) | (abs(lat_reg[min_la_tt,min_lo_tt]) > 70):
@@ -1238,7 +1236,7 @@ def COL_tracking(cy_z500_objects,
                 object_slice[tt,:,:] = 0
                 continue 
 
-                        # remove cyclones that are close to the poles
+            # remove cyclones that are close to the poles
             if np.max(np.abs(lat_reg)) > 88:
                 logging.debug(f"{Fore.YELLOW}Cyclone {iobj+1} at {times[time_start+tt].strftime('%Y-%m-%d %HUTC')} is not COL because it is too close to the poles")
                 object_slice[tt,:,:] = 0
@@ -1261,7 +1259,8 @@ def COL_tracking(cy_z500_objects,
             rdist = haversine(lat_reg[min_la_tt,min_lo_tt],lon_reg[min_la_tt,min_lo_tt],lat_reg,lon_reg)
     
             ring = (rdist >= (col_ring_isolation - (grid_spacing)*2))  & (rdist <= (col_ring_isolation + (grid_spacing)*2))
-            if np.sum((z500_reg[ring] - min_z500_obj) > col_thres_isolation) < np.sum(ring)*col_percent_isolation:
+            if np.sum((z500_reg[ring] - min_z500_obj)/const.g > col_thres_isolation) < np.sum(ring)*col_percent_isolation:
+                    logging.debug(f"{Fore.YELLOW}Cyclone {iobj+1} at {times[time_start+tt].strftime('%Y-%m-%d %HUTC')} is not COL because is not detached enough")
                     object_slice[tt,:,:] = 0
                     continue
             
@@ -1311,10 +1310,25 @@ def COL_tracking(cy_z500_objects,
                 continue
 
             # # CRITERIA 5) Check if system is not too close to borders (not closed system)
+
             if lat_start == 0 or lat_stop == y_size or lon_start == 0 or lon_stop == x_size:
-                logging.debug(f"{Fore.YELLOW}Cyclone {iobj+1} at {times[time_start+tt].strftime('%Y-%m-%d %HUTC')} is not COL because it is too close to the border")
-                object_slice[tt,:,:] = 0
-                continue 
+                
+                if lat_start == 0 and np.any(object_slice[tt,0,:]==1):
+                    logging.debug(f"{Fore.YELLOW}Cyclone {iobj+1} at {times[time_start+tt].strftime('%Y-%m-%d %HUTC')} is not COL because it is too close to the border")
+                    object_slice[tt,:,:] = 0
+                    continue
+                if lat_stop == y_size and np.any(object_slice[tt,-1,:]==1):
+                    logging.debug(f"{Fore.YELLOW}Cyclone {iobj+1} at {times[time_start+tt].strftime('%Y-%m-%d %HUTC')} is not COL because it is too close to the border")
+                    object_slice[tt,:,:] = 0
+                    continue
+                if lon_start == 0 and np.any(object_slice[tt,:,0]==1):
+                    logging.debug(f"{Fore.YELLOW}Cyclone {iobj+1} at {times[time_start+tt].strftime('%Y-%m-%d %HUTC')} is not COL because it is too close to the border")
+                    object_slice[tt,:,:] = 0
+                    continue
+                if lon_stop == x_size and np.any(object_slice[tt,:,-1]==1):
+                    logging.debug(f"{Fore.YELLOW}Cyclone {iobj+1} at {times[time_start+tt].strftime('%Y-%m-%d %HUTC')} is not COL because it is too close to the border")
+                    object_slice[tt,:,:] = 0
+                    continue
 
         # CRITERIA 6) Remove objects that are too short after all checks
         obj_life = object_slice.sum(axis=(1,2))>0
