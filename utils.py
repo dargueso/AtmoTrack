@@ -40,19 +40,33 @@ class Style:
 # ---------------------------------------------------------------------------
 _RESET = "\033[0m" if _use_color else ""
 
+_LEVEL_COLORS = {
+    "DEBUG":    "\033[36m",   # cyan
+    "INFO":     "\033[32m",   # green
+    "WARNING":  "\033[33m",   # yellow
+    "ERROR":    "\033[31m",   # red
+    "CRITICAL": "\033[35m",   # magenta
+} if _use_color else {}
+
+_DATEFMT = "%Y-%m-%d %H:%M:%S"
+
 
 class _ColoredFormatter(logging.Formatter):
-    """Formatter that appends ANSI reset after every record so that inline
-    color codes in log messages (Fore.GREEN etc.) do not bleed into the next
-    line.  No-op when not connected to a TTY."""
+    """Formats as 'YYYY-MM-DD HH:MM:SS | LEVEL: message'.
+
+    When connected to a TTY the entire line is colorized per level.
+    No-op (plain text) otherwise (batch jobs, log files).
+    """
 
     def format(self, record: logging.LogRecord) -> str:
-        msg = super().format(record)
-        return msg + _RESET if _use_color else msg
+        asctime = self.formatTime(record, self.datefmt)
+        msg = record.getMessage()
+        line = f"{asctime} | {record.levelname}: {msg}"
+        color = _LEVEL_COLORS.get(record.levelname, "")
+        return f"{color}{line}{_RESET}" if color else line
 
 
-_FMT = "%(asctime)s %(levelname)-8s %(message)s"
-_DATEFMT = "%Y-%m-%d %H:%M:%S"
+_FMT = "%(asctime)s | %(levelname)s: %(message)s"  # plain file handler
 
 
 def get_logger(
