@@ -52,8 +52,7 @@ def main():
 ###########################################################
 def cutofflow_tracking(z500_finname, verbose=False):
     """Track COLs for a single annual file."""
-    logger = get_logger("atmotrack", log_file="out.log",
-                        level=logging.DEBUG if verbose else logging.INFO)
+    logger = get_logger("atmotrack", level=logging.DEBUG if verbose else logging.INFO)
     logger.info(f"Analyzing {z500_finname}")
     start_time = time.time()
 
