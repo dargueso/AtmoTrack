@@ -57,8 +57,9 @@ MCS_min_time      = 5      # minimum lifetime of MCS [hours]
 [cy_acy_z500]
 # 500 hPa Cyclone / Anticyclone tracking options
 # ---------------------------------------------------------------------------
-smooth_sigma_z500    = 0       # Gaussian std for z500 smoothing (unused; kept for reference)
-z500_smooth_low_anom = -80     # lower threshold for smooth z500 anomaly [m]
+z500_smooth_method   = "uniform" # small-scale smoothing method: "uniform" or "gaussian"
+z500_smooth_scale_km = 100       # smoothing scale [km] — window size (uniform) or sigma (gaussian)
+z500_smooth_low_anom = -80       # lower threshold for smooth z500 anomaly [m]
 z500_smooth_high_anom = 70     # upper threshold for smooth z500 anomaly [m]
 MinTimeCY            = 12      # minimum lifetime of cyclones [hours]
 MinTimeACY           = 12      # minimum lifetime of anticyclones [hours]

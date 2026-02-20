@@ -976,6 +976,8 @@ def CY_ACY_z500_tracking(
     z500_high_anom = cfg.z500_smooth_high_anom
     MinTimeCY = cfg.MinTimeCY
     MinTimeACY = cfg.MinTimeACY
+    z500_smooth_method = cfg.z500_smooth_method
+    z500_smooth_scale_km = cfg.z500_smooth_scale_km
 
 
 
@@ -1004,7 +1006,11 @@ def CY_ACY_z500_tracking(
     #Divide by gravity to get geopotential height
     z500 = z500_data / const.g
 
-    z500_smooth = filters.uniform_filter(z500, size=(1, int(100/(grid_spacing/1000.)), int(100/(grid_spacing/1000.))))
+    spatial_steps = int(z500_smooth_scale_km / (grid_spacing / 1000.))
+    if z500_smooth_method == "gaussian":
+        z500_smooth = filters.gaussian_filter(z500, sigma=(0, spatial_steps, spatial_steps))
+    else:
+        z500_smooth = filters.uniform_filter(z500, size=(1, spatial_steps, spatial_steps))
 
     z500_smooth_mean = filters.uniform_filter(z500, size=(int(78/DT), int(3000/(grid_spacing/1000.)), int(3000/(grid_spacing/1000.))))
 
