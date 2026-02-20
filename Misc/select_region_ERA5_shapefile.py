@@ -19,11 +19,11 @@ Usage:
       --output ./mask_region.nc \\
       --regions 0 1 2
 """
+
 import argparse
 
 import cartopy.crs as ccrs
 import geopandas as gpd
-import matplotlib.patheffects as pe
 import matplotlib.pyplot as plt
 import numpy as np
 import regionmask
@@ -37,24 +37,27 @@ def parse_args():
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
-        "--input", required=True,
+        "--input",
+        required=True,
         help="ERA5 NetCDF file used to read the lat/lon grid",
     )
     parser.add_argument(
-        "--shapefile", required=True,
+        "--shapefile",
+        required=True,
         help="Shapefile (.shp) defining the region boundary",
     )
     parser.add_argument(
-        "--output", default="./mask_region.nc",
+        "--output",
+        default="./mask_region.nc",
         help="Output NetCDF path (default: ./mask_region.nc)",
     )
     parser.add_argument(
-        "--regions", type=int, nargs="+", default=None,
+        "--regions",
+        type=int,
+        nargs="+",
+        default=None,
         metavar="IDX",
-        help=(
-            "0-based indices of sub-regions to include "
-            "(default: first region only)"
-        ),
+        help=("0-based indices of sub-regions to include (default: first region only)"),
     )
     return parser.parse_args()
 
@@ -82,13 +85,11 @@ def main():
         new_masks = mask.isel(region=[0]).values
 
     # Convert boolean to 0/1 and collapse multiple regions to 2-D
-    new_masks = np.where(new_masks == False, 0, 1)
+    new_masks = np.where(not new_masks, 0, 1)
     new_masks = np.nanmean(new_masks, axis=0)
 
     # Export as NetCDF
-    export = xr.Dataset(
-        {"source_region": (["latitude", "longitude"], new_masks.astype(float))}
-    )
+    export = xr.Dataset({"source_region": (["latitude", "longitude"], new_masks.astype(float))})
     export["longitude"] = ("longitude", longitude)
     export["latitude"] = ("latitude", latitude)
     export.to_netcdf(args.output)
@@ -106,8 +107,12 @@ def main():
     ax.add_feature(cfeature.RIVERS, zorder=2, linewidth=3, alpha=0.5)
     ax.add_feature(cfeature.STATES, zorder=2, facecolor="w")
     ax.add_feature(
-        cfeature.LAKES, zorder=2, linewidth=0.8,
-        edgecolor="k", alpha=0.5, facecolor="w",
+        cfeature.LAKES,
+        zorder=2,
+        linewidth=0.8,
+        edgecolor="k",
+        alpha=0.5,
+        facecolor="w",
     )
 
     indices = export.where(export.source_region == 1, drop=True)
@@ -115,10 +120,14 @@ def main():
     lon_indices_c = [float(i) * -1 if float(i) <= 180 else float(i) for i in lon_indices]
 
     ax.contourf(longitude, latitude, new_masks, levels=[0.1, 1], zorder=5, alpha=0.8)
-    ax.set_extent([
-        min(lon_indices_c) - 3, max(lon_indices_c) + 3,
-        float(indices.latitude.min()) - 3, float(indices.latitude.max()) + 3,
-    ])
+    ax.set_extent(
+        [
+            min(lon_indices_c) - 3,
+            max(lon_indices_c) + 3,
+            float(indices.latitude.min()) - 3,
+            float(indices.latitude.max()) + 3,
+        ]
+    )
 
     gl = ax.gridlines(draw_labels=True, alpha=0.5, linestyle=":", color="k")
     gl.top_labels = False

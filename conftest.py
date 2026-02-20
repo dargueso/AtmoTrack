@@ -4,6 +4,7 @@ conftest.py — pytest configuration for AtmoTrack.
 Ensures the project root is on sys.path so that pytest can always import
 AtmoTrack modules regardless of the working directory it is invoked from.
 """
+
 import sys
 from pathlib import Path
 

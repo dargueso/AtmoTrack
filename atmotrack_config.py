@@ -14,10 +14,9 @@ For Python 3.9 / 3.10, install the back-port:  pip install tomli
 """
 
 import pathlib
-import sys
 
 try:
-    import tomllib          # Python 3.11+
+    import tomllib  # Python 3.11+
 except ImportError:
     try:
         import tomli as tomllib  # type: ignore[no-redef]

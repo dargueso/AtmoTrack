@@ -9,15 +9,15 @@ For each annual ERA5 SLP file in ``data_era5/``:
 
 All parameters (thresholds, paths) are read from ``config.toml``.
 """
-from glob import glob
+
+import logging
 import os
 import time
-import logging
+from glob import glob
+
 import numpy as np
-
-import xarray as xr
 import pandas as pd
-
+import xarray as xr
 from joblib import Parallel, delayed
 
 import atmotrack_config as cfg
@@ -57,9 +57,7 @@ def slp_tracking(slp_finname):
 
     logging.debug(f"Loading data: {time.time() - start_time:.2f} s")
 
-    fileout = slp_finname.replace("SLP", "cy_slp").replace(
-        cfg.data_era5, cfg.data_tracking
-    )
+    fileout = slp_finname.replace("SLP", "cy_slp").replace(cfg.data_era5, cfg.data_tracking)
 
     _, _ = CY_ACY_slp_tracking(slp_data, times, lon2d, lat2d, nc_file=fileout)
 

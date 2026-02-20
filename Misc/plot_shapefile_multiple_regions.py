@@ -8,6 +8,7 @@ Usage:
   python plot_shapefile_multiple_regions.py --shapefile /path/to/regions.shp
   python plot_shapefile_multiple_regions.py --shapefile /path/to/regions.shp --output regions_map.png
 """
+
 import argparse
 import random
 
@@ -22,11 +23,13 @@ def parse_args():
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
-        "--shapefile", required=True,
+        "--shapefile",
+        required=True,
         help="Shapefile (.shp) to visualise",
     )
     parser.add_argument(
-        "--output", default=None,
+        "--output",
+        default=None,
         help="Save plot to this file instead of showing it interactively",
     )
     return parser.parse_args()

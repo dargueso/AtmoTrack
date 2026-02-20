@@ -19,18 +19,20 @@ _use_color: bool = hasattr(sys.stderr, "isatty") and sys.stderr.isatty()
 
 class Fore:
     """ANSI foreground color codes (empty strings when not a TTY)."""
-    GREEN   = "\033[32m" if _use_color else ""
-    YELLOW  = "\033[33m" if _use_color else ""
+
+    GREEN = "\033[32m" if _use_color else ""
+    YELLOW = "\033[33m" if _use_color else ""
     MAGENTA = "\033[35m" if _use_color else ""
-    RED     = "\033[31m" if _use_color else ""
-    CYAN    = "\033[36m" if _use_color else ""
-    BLUE    = "\033[34m" if _use_color else ""
+    RED = "\033[31m" if _use_color else ""
+    CYAN = "\033[36m" if _use_color else ""
+    BLUE = "\033[34m" if _use_color else ""
 
 
 class Style:
     """ANSI style codes (empty strings when not a TTY)."""
-    BRIGHT    = "\033[1m"  if _use_color else ""
-    RESET_ALL = "\033[0m"  if _use_color else ""
+
+    BRIGHT = "\033[1m" if _use_color else ""
+    RESET_ALL = "\033[0m" if _use_color else ""
 
 
 # ---------------------------------------------------------------------------
@@ -73,7 +75,7 @@ def get_logger(
     >>> logger.info("Starting")
     """
     logger = logging.getLogger(name)
-    if logger.handlers:          # already configured — idempotent
+    if logger.handlers:  # already configured — idempotent
         return logger
 
     logger.setLevel(level)
