@@ -10,6 +10,7 @@ For each annual ERA5 SLP file in ``data_era5/``:
 All parameters (thresholds, paths) are read from ``config.toml``.
 """
 
+import argparse
 import os
 import time
 from glob import glob
@@ -27,9 +28,19 @@ from utils import get_logger
 ###########################################################
 def main():
     """Loop over available annual SLP files and track surface CY/ACY in parallel."""
+    parser = argparse.ArgumentParser(description="Surface CY/ACY tracking from ERA5 SLP.")
+    parser.add_argument("--year-start", type=int, default=1940, metavar="YEAR",
+                        help="First year to process (default: 1940)")
+    parser.add_argument("--year-end", type=int, default=2024, metavar="YEAR",
+                        help="Last year to process (default: 2024)")
+    args = parser.parse_args()
+
     get_logger("atmotrack", log_file="out.log")
     os.makedirs(cfg.data_tracking, exist_ok=True)
-    filesin = sorted(glob(f"{cfg.data_era5}/era5_daily_SLP_????.nc"))
+    filesin = sorted(
+        f for f in glob(f"{cfg.data_era5}/era5_daily_SLP_????.nc")
+        if args.year_start <= int(f[-7:-3]) <= args.year_end
+    )
     Parallel(n_jobs=-1)(delayed(slp_tracking)(fin_name) for fin_name in filesin)
 
 
