@@ -19,6 +19,8 @@ from .shared import (
     remove_small_short_objects,
 )
 
+logger = logging.getLogger("atmotrack")
+
 
 def MCS_tracking(pr_data, bt_data, times, Lon, Lat, nc_file):
     """Function to track MCS from precipitation and brightness temperature"""
@@ -61,19 +63,19 @@ def MCS_tracking(pr_data, bt_data, times, Lon, Lat, nc_file):
         crosses_dateline = True
 
     end_time = time.time()
-    logging.debug(
+    logger.debug(
         f"======> 'Initialize MCS tracking function: {(end_time - start_time):.2f} seconds \n"
     )
     start_time = time.time()
     # --------------------------------------------------------
     # TRACKING PRECIP OBJECTS
     # --------------------------------------------------------
-    logging.debug("        track  precipitation")
+    logger.debug("        track  precipitation")
 
     pr_smooth = filters.gaussian_filter(pr_data, sigma=(0, smooth_sigma_pr, smooth_sigma_pr))
     pr_mask = pr_smooth >= thres_pr * DT
     objects_id_pr, num_objects = ndimage.label(pr_mask, structure=obj_structure_3D)
-    logging.debug("            " + str(num_objects) + " precipitation object found")
+    logger.debug("            " + str(num_objects) + " precipitation object found")
 
     # connect objects over date line
     if crosses_dateline:
@@ -104,20 +106,20 @@ def MCS_tracking(pr_data, bt_data, times, Lon, Lat, nc_file):
     )
 
     end_time = time.time()
-    logging.debug(f"======> 'Tracking precip: {(end_time - start_time):.2f} seconds \n")
+    logger.debug(f"======> 'Tracking precip: {(end_time - start_time):.2f} seconds \n")
     start_time = time.time()
     # --------------------------------------------------------
     # TRACKING CLOUD (BT) OBJECTS
     # --------------------------------------------------------
-    logging.debug("            track  clouds")
+    logger.debug("            track  clouds")
     bt_smooth = filters.gaussian_filter(bt_data, sigma=(0, smooth_sigma_bt, smooth_sigma_bt))
     bt_mask = bt_smooth <= thres_bt
     objects_id_bt, num_objects = ndimage.label(bt_mask, structure=obj_structure_3D)
-    logging.debug("            " + str(num_objects) + " cloud object found")
+    logger.debug("            " + str(num_objects) + " cloud object found")
 
     # connect objects over date line
     if crosses_dateline:
-        logging.debug("            connect cloud objects over date line")
+        logger.debug("            connect cloud objects over date line")
         objects_id_bt = ConnectLon(objects_id_bt)
 
     # get indices of object to reduce memory requirements during manipulation
@@ -133,14 +135,14 @@ def MCS_tracking(pr_data, bt_data, times, Lon, Lat, nc_file):
     )
 
     end_time = time.time()
-    logging.debug(f"======> 'Tracking clouds: {(end_time - start_time):.2f} seconds \n")
+    logger.debug(f"======> 'Tracking clouds: {(end_time - start_time):.2f} seconds \n")
     start_time = time.time()
 
-    # logging.debug("            break up long living cloud shield objects that heve many elements")
+    # logger.debug("            break up long living cloud shield objects that heve many elements")
     # bt_objects = BreakupObjects(bt_objects, int(min_time_bt / DT), DT)
 
     end_time = time.time()
-    logging.debug(f"======> 'Breaking up cloud objects: {(end_time - start_time):.2f} seconds \n")
+    logger.debug(f"======> 'Breaking up cloud objects: {(end_time - start_time):.2f} seconds \n")
     start_time = time.time()
 
     calc_object_characteristics(
@@ -155,7 +157,7 @@ def MCS_tracking(pr_data, bt_data, times, Lon, Lat, nc_file):
         min_tsteps=int(min_time_bt / DT),  # minimum lifetime in data timesteps
     )
     end_time = time.time()
-    logging.debug(
+    logger.debug(
         f"======> 'Calculate cloud characteristics: {(end_time - start_time):.2f} seconds \n"
     )
     start_time = time.time()
@@ -163,7 +165,7 @@ def MCS_tracking(pr_data, bt_data, times, Lon, Lat, nc_file):
     # CHECK IF PR OBJECTS QUALIFY AS MCS
     # (or selected strom type according to msc_config.py)
     # --------------------------------------------------------
-    logging.debug("            check if pr objects quallify as MCS (or selected storm type)")
+    logger.debug("            check if pr objects quallify as MCS (or selected storm type)")
     # check if precipitation object is from an MCS
     object_indices = ndimage.find_objects(pr_objects)
     MCS_objects = np.zeros(pr_objects.shape, dtype=int)
@@ -266,14 +268,14 @@ def MCS_tracking(pr_data, bt_data, times, Lon, Lat, nc_file):
     )
 
     end_time = time.time()
-    logging.debug(f"======> 'MCS tracking: {(end_time - start_time):.2f} seconds \n")
+    logger.debug(f"======> 'MCS tracking: {(end_time - start_time):.2f} seconds \n")
     start_time = time.time()
 
     ###########################################################
     ###########################################################
     ## WRite netCDF with xarray
     if nc_file is not None:
-        logging.debug("Save objects into a netCDF")
+        logger.debug("Save objects into a netCDF")
 
         fino = xr.Dataset(
             {
@@ -301,10 +303,10 @@ def MCS_tracking(pr_data, bt_data, times, Lon, Lat, nc_file):
         )
 
         end_time = time.time()
-        logging.debug(f"======> 'Writing files: {(end_time - start_time):.2f} seconds \n")
+        logger.debug(f"======> 'Writing files: {(end_time - start_time):.2f} seconds \n")
         start_time = time.time()
     else:
-        logging.debug("No writing files required, output file name is empty")
+        logger.debug("No writing files required, output file name is empty")
     ###########################################################
     ###########################################################
     # ============================

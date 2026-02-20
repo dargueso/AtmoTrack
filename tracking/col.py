@@ -15,6 +15,8 @@ from utils import Fore, Style
 
 from .shared import calc_grid_distance_area, haversine, split_objects
 
+logger = logging.getLogger("atmotrack")
+
 
 def Front_tracking(u850, v850, t850, times, Lon, Lat, Mask=None):
     """
@@ -79,7 +81,7 @@ def Front_tracking(u850, v850, t850, times, Lon, Lat, Mask=None):
 
     # Label connected regions that exceed the threshold
     rgiObjectsUD, nr_objectsUD = ndimage.label(Fmask, structure=rgiObj_Struct_Fronts)
-    logging.debug(f"{Fore.GREEN}  {str(nr_objectsUD)} object(s) found")
+    logger.debug(f"{Fore.GREEN}  {str(nr_objectsUD)} object(s) found")
 
     # Define the grid cell area if not provided
     # Assume approximately equal area if you don't have exact Area data
@@ -207,13 +209,13 @@ def COL_tracking(
         z500_slice_obj = np.copy(z500_slice)
         z500_slice_obj[object_slice == 0] = np.nan
 
-        logging.debug(
+        logger.debug(
             f"{Fore.GREEN} Cyclone {iobj + 1} starts at {times[time_start].strftime('%Y-%m-%d %HUTC')}"
         )
         for tt in range(z500_slice_obj.shape[0]):
             if np.isnan(z500_slice_obj[tt]).all():
                 # no object to process
-                logging.debug(
+                logger.debug(
                     f"{Fore.YELLOW} Cyclone {iobj + 1} at {times[time_start + tt].strftime('%Y-%m-%d %HUTC')} is not COL because there is no object"
                 )
                 object_slice[tt, :, :] = 0
@@ -258,7 +260,7 @@ def COL_tracking(
             if (abs(lat_reg[min_la_tt, min_lo_tt]) < 20) | (
                 abs(lat_reg[min_la_tt, min_lo_tt]) > 70
             ):
-                logging.debug(
+                logger.debug(
                     f"{Fore.YELLOW}Cyclone {iobj + 1} at {times[time_start + tt].strftime('%Y-%m-%d %HUTC')} is not COL because of latitude (not in 20-70)"
                 )
                 object_slice[tt, :, :] = 0
@@ -266,7 +268,7 @@ def COL_tracking(
 
             # remove cyclones that are close to the poles
             if np.max(np.abs(lat_reg)) > 88:
-                logging.debug(
+                logger.debug(
                     f"{Fore.YELLOW}Cyclone {iobj + 1} at {times[time_start + tt].strftime('%Y-%m-%d %HUTC')} is not COL because it is too close to the poles"
                 )
                 object_slice[tt, :, :] = 0
@@ -278,7 +280,7 @@ def COL_tracking(
                 | (np.max(lon_reg[object_reg[:, :] == 1]) > col_max_lon)
                 | (np.min(lon_reg[object_reg[:, :] == 1]) < col_min_lon)
             ):
-                logging.debug(
+                logger.debug(
                     f"{Fore.YELLOW}Cyclone {iobj + 1} at {times[time_start + tt].strftime('%Y-%m-%d %HUTC')} is not COL because it is too far north or south (or next to the border)"
                 )
                 object_slice[tt, :, :] = 0
@@ -302,7 +304,7 @@ def COL_tracking(
                 np.sum((z500_reg[ring] - min_z500_obj) / const.g > col_thres_isolation)
                 < np.sum(ring) * col_percent_isolation
             ):
-                logging.debug(
+                logger.debug(
                     f"{Fore.YELLOW}Cyclone {iobj + 1} at {times[time_start + tt].strftime('%Y-%m-%d %HUTC')} is not COL because is not detached enough"
                 )
                 object_slice[tt, :, :] = 0
@@ -316,13 +318,13 @@ def COL_tracking(
 
             if east_flow.shape[0] != 0:
                 if np.min(east_flow) > 0:
-                    logging.debug(
+                    logger.debug(
                         f"{Fore.YELLOW}Cyclone {iobj + 1} at {times[time_start + tt].strftime('%Y-%m-%d %HUTC')} is not COL because of eastward flow"
                     )
                     object_slice[tt, :, :] = 0
                     continue
             elif east_flow.shape[0] == 0:
-                logging.debug(
+                logger.debug(
                     f"{Fore.YELLOW}Cyclone {iobj + 1} at {times[time_start + tt].strftime('%Y-%m-%d %HUTC')} is not COL because of eastward flow, too close to upper boundary"
                 )
                 object_slice[tt, :, :] = 0
@@ -332,11 +334,11 @@ def COL_tracking(
 
             # front_test = np.sum(np.abs(front_reg[:, min_lo_tt:]) > 1)
             # if front_test < 1:
-            #     logging.debug(f'{Fore.YELLOW}yclone {iobj+1} at {tt} is not COL because of no front to the east')
+            #     logger.debug(f'{Fore.YELLOW}yclone {iobj+1} at {tt} is not COL because of no front to the east')
             #     object_slice[tt,:,:] = 0
             #     continue
             if (min_z500_obj / const.g) > col_z500_threshold_min:
-                logging.debug(
+                logger.debug(
                     f"{Fore.YELLOW}Cyclone {iobj + 1} at {times[time_start + tt].strftime('%Y-%m-%d %HUTC')} is not COL because of z500 threshold (not deep enough)"
                 )
                 object_slice[tt, :, :] = 0
@@ -356,7 +358,7 @@ def COL_tracking(
                 or obj_track_lon < col_region[0]
                 or obj_track_lon > col_region[1]
             ):
-                logging.debug(
+                logger.debug(
                     f"{Fore.YELLOW}Cyclone {iobj + 1} at {times[time_start + tt].strftime('%Y-%m-%d %HUTC')} is not COL because it is outside {col_region}"
                 )
 
@@ -367,25 +369,25 @@ def COL_tracking(
 
             if lat_start == 0 or lat_stop == y_size or lon_start == 0 or lon_stop == x_size:
                 if lat_start == 0 and np.any(object_slice[tt, 0, :] == 1):
-                    logging.debug(
+                    logger.debug(
                         f"{Fore.YELLOW}Cyclone {iobj + 1} at {times[time_start + tt].strftime('%Y-%m-%d %HUTC')} is not COL because it is too close to the border"
                     )
                     object_slice[tt, :, :] = 0
                     continue
                 if lat_stop == y_size and np.any(object_slice[tt, -1, :] == 1):
-                    logging.debug(
+                    logger.debug(
                         f"{Fore.YELLOW}Cyclone {iobj + 1} at {times[time_start + tt].strftime('%Y-%m-%d %HUTC')} is not COL because it is too close to the border"
                     )
                     object_slice[tt, :, :] = 0
                     continue
                 if lon_start == 0 and np.any(object_slice[tt, :, 0] == 1):
-                    logging.debug(
+                    logger.debug(
                         f"{Fore.YELLOW}Cyclone {iobj + 1} at {times[time_start + tt].strftime('%Y-%m-%d %HUTC')} is not COL because it is too close to the border"
                     )
                     object_slice[tt, :, :] = 0
                     continue
                 if lon_stop == x_size and np.any(object_slice[tt, :, -1] == 1):
-                    logging.debug(
+                    logger.debug(
                         f"{Fore.YELLOW}Cyclone {iobj + 1} at {times[time_start + tt].strftime('%Y-%m-%d %HUTC')} is not COL because it is too close to the border"
                     )
                     object_slice[tt, :, :] = 0
@@ -401,12 +403,12 @@ def COL_tracking(
             extended_obj_life = np.arange(obj_life_true[0], obj_life_true[-1] + 1)
 
         if extended_obj_life.size < col_min_dur / DT:
-            logging.debug(
+            logger.debug(
                 f"{Fore.YELLOW}Cyclone {iobj + 1} is not COL because it is too short after all other criteria applied"
             )
             continue
         else:
-            logging.debug(
+            logger.debug(
                 f"{Fore.GREEN}Cyclone {iobj + 1} at {times[time_start + tt].strftime('%Y-%m-%d %HUTC')} is a COL"
             )
 
@@ -420,10 +422,10 @@ def COL_tracking(
     # Number of col_objects identified
     col_objects_ids = np.unique(col_objects)
     col_objects_ids = col_objects_ids[col_objects_ids > 0]
-    logging.debug(f"{Fore.GREEN} {col_objects_ids.size} Cut-off lows found")
+    logger.debug(f"{Fore.GREEN} {col_objects_ids.size} Cut-off lows found")
 
     if nc_file is not None:
-        logging.debug(f"{Style.BRIGHT} Save objects into a netCDF")
+        logger.debug(f"{Style.BRIGHT} Save objects into a netCDF")
 
         fino = xr.Dataset(
             {
@@ -471,12 +473,12 @@ def COL_tracking(
         )
 
         end_time = time.time()
-        logging.debug(
+        logger.debug(
             f"{Style.BRIGHT} ======> 'Writing files: {(end_time - start_time):.2f} seconds \n"
         )
         start_time = time.time()
 
     else:
-        logging.debug(f"{Fore.YELLOW}No writing files required, output file name is empty")
+        logger.debug(f"{Fore.YELLOW}No writing files required, output file name is empty")
 
     return col_objects
