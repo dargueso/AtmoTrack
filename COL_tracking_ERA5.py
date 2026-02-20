@@ -12,6 +12,7 @@ All parameters (thresholds, domain, paths) are read from ``config.toml``.
 """
 
 import argparse
+import logging
 import os
 import time
 from glob import glob
@@ -34,9 +35,12 @@ def main():
                         help="First year to process (default: 1940)")
     parser.add_argument("--year-end", type=int, default=2024, metavar="YEAR",
                         help="Last year to process (default: 2024)")
+    parser.add_argument("--verbose", "-v", action="store_true",
+                        help="Enable DEBUG-level logging")
     args = parser.parse_args()
 
-    get_logger("atmotrack", log_file="out.log")
+    get_logger("atmotrack", log_file="out.log",
+               level=logging.DEBUG if args.verbose else logging.INFO)
     os.makedirs(cfg.data_tracking, exist_ok=True)
     filesin = sorted(
         f for f in glob(f"{cfg.data_era5}/era5_daily_500hPa_????.nc")
