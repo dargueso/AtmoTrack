@@ -5,7 +5,6 @@ import matplotlib.gridspec as gridspec
 import matplotlib.dates as mdates
 from scipy.stats import linregress,t
 import numpy as np
-import xarray as xr
 import glob
 
 def add_trend_with_ci(ax, years, data, scale_factor=10, color='k', label=''):
