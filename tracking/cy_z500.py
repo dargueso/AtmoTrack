@@ -15,6 +15,8 @@ from utils import Fore, Style
 
 from .shared import BreakupObjects, ConnectLon, calc_grid_distance_area, clean_up_objects
 
+logger = logging.getLogger("atmotrack")
+
 
 def CY_ACY_z500_tracking(z500_data, times, Lon, Lat, nc_file=None):
 
@@ -45,7 +47,7 @@ def CY_ACY_z500_tracking(z500_data, times, Lon, Lat, nc_file=None):
         crosses_dateline = True
 
     end_time = time.time()
-    logging.debug(
+    logger.debug(
         f"{Fore.MAGENTA}======> 'Initialize z500 Cyclone/Anticyclone tracking function: {(end_time - start_time):.2f} seconds \n"
     )
     start_time = time.time()
@@ -53,7 +55,7 @@ def CY_ACY_z500_tracking(z500_data, times, Lon, Lat, nc_file=None):
     # --------------------------------------------------------
     # TRACKING z500 anomaly OBJECTS
     # --------------------------------------------------------
-    logging.debug(f"{Style.BRIGHT} Tracking 500 hPa cyclones and anticyclones")
+    logger.debug(f"{Style.BRIGHT} Tracking 500 hPa cyclones and anticyclones")
 
     # Divide by gravity to get geopotential height
     z500 = z500_data / const.g
@@ -79,10 +81,10 @@ def CY_ACY_z500_tracking(z500_data, times, Lon, Lat, nc_file=None):
     z_high = z500_smooth_anom > z500_high_anom
 
     objects_id_z500_low, low_num_objects = ndimage.label(z_low, structure=obj_structure_3D)
-    logging.debug(f"{Fore.GREEN} {low_num_objects} cyclones found")
+    logger.debug(f"{Fore.GREEN} {low_num_objects} cyclones found")
 
     objects_id_z500_high, hi_num_objects = ndimage.label(z_high, structure=obj_structure_3D)
-    logging.debug(f"{Fore.GREEN} {hi_num_objects} anticyclones found")
+    logger.debug(f"{Fore.GREEN} {hi_num_objects} anticyclones found")
 
     # connect objects over date line
     if crosses_dateline:
@@ -105,7 +107,7 @@ def CY_ACY_z500_tracking(z500_data, times, Lon, Lat, nc_file=None):
     acy_z500_objects = BreakupObjects(acy_z500_objects, min_tsteps=int(MinTimeACY / DT), dT=DT)
 
     end_time = time.time()
-    logging.debug(
+    logger.debug(
         f"{Fore.GREEN}======> 'z500 cyclone/anticyclone tracking: {(end_time - start_time):.2f} seconds \n"
     )
     start_time = time.time()
@@ -114,7 +116,7 @@ def CY_ACY_z500_tracking(z500_data, times, Lon, Lat, nc_file=None):
     #####################################################################
 
     if nc_file is not None:
-        logging.debug(f"{Style.BRIGHT} Save objects into a netCDF")
+        logger.debug(f"{Style.BRIGHT} Save objects into a netCDF")
 
         fino = xr.Dataset(
             {
@@ -138,12 +140,12 @@ def CY_ACY_z500_tracking(z500_data, times, Lon, Lat, nc_file=None):
         )
 
         end_time = time.time()
-        logging.debug(
+        logger.debug(
             f"{Style.BRIGHT} ======> 'Writing files: {(end_time - start_time):.2f} seconds \n"
         )
         start_time = time.time()
 
     else:
-        logging.debug(f"{Fore.YELLOW}No writing files required, output file name is empty")
+        logger.debug(f"{Fore.YELLOW}No writing files required, output file name is empty")
 
     return cy_z500_objects, acy_z500_objects

@@ -11,6 +11,8 @@ from scipy.ndimage import distance_transform_edt
 
 from constants import const
 
+logger = logging.getLogger("atmotrack")
+
 
 def haversine(lat1, lon1, lat2, lon2):
     """Function to calculate grid distances lat-lon
@@ -149,7 +151,7 @@ def calc_object_characteristics(
 
     if num_objects >= 1:
         objects_charac = {}
-        logging.debug("            Loop over " + str(num_objects) + " objects")
+        logger.debug("            Loop over " + str(num_objects) + " objects")
         for iobj in range(num_objects):
             object_slice = np.copy(var_objects[object_indices[iobj]])
             data_slice = np.copy(var_data[object_indices[iobj]])

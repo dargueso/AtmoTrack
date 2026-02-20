@@ -21,6 +21,8 @@ from .shared import (
     smooth_uniform,
 )
 
+logger = logging.getLogger("atmotrack")
+
 
 def watershed_2d_overlap(
     anom_sel_masked,  # 3D [time,lat,lon] anomaly field for watersheding
@@ -67,7 +69,7 @@ def watershed_2d_overlap(
     ob_max = np.max(labels[0, :]) + 1
 
     for tt in range(objects_watershed.shape[0]):
-        logging.debug(f"watershed_2d_overlap: timestep {tt}/{objects_watershed.shape[0]}")
+        logger.debug(f"watershed_2d_overlap: timestep {tt}/{objects_watershed.shape[0]}")
         if tt == 0:
             objects_watershed[tt, :] = labels[tt, :]
         else:
@@ -157,12 +159,12 @@ def CY_ACY_slp_tracking(
         crosses_dateline = True
 
     end_time = time.time()
-    logging.debug(
+    logger.debug(
         f"{Fore.MAGENTA}======> 'Initialize SLP Cyclone/Anticyclone tracking: {(end_time - start_time):.2f} seconds \n"
     )
     start_time = time.time()
 
-    logging.debug(f"{Style.BRIGHT} Tracking surface cyclones and anticyclones from SLP")
+    logger.debug(f"{Style.BRIGHT} Tracking surface cyclones and anticyclones from SLP")
 
     # Convert Pa -> hPa
     slp = slp_data / 100.0
@@ -178,7 +180,7 @@ def CY_ACY_slp_tracking(
     # --- Cyclones ---
     z_low = slp_anomaly < slp_low_anom
     objects_id_slp_low, low_num_objects = ndimage.label(z_low, structure=obj_structure_3D)
-    logging.debug(f"{Fore.GREEN} {low_num_objects} surface cyclone candidates found")
+    logger.debug(f"{Fore.GREEN} {low_num_objects} surface cyclone candidates found")
 
     cy_slp_objects, _ = clean_up_objects(
         objects_id_slp_low, min_tsteps=int(MinTimeCY_SLP / DT), dT=DT
@@ -207,7 +209,7 @@ def CY_ACY_slp_tracking(
     # --- Anticyclones ---
     z_high = slp_anomaly > slp_high_anom
     objects_id_slp_high, hi_num_objects = ndimage.label(z_high, structure=obj_structure_3D)
-    logging.debug(f"{Fore.GREEN} {hi_num_objects} surface anticyclone candidates found")
+    logger.debug(f"{Fore.GREEN} {hi_num_objects} surface anticyclone candidates found")
 
     acy_slp_objects, _ = clean_up_objects(
         objects_id_slp_high, min_tsteps=int(MinTimeACY_SLP / DT), dT=DT
@@ -236,7 +238,7 @@ def CY_ACY_slp_tracking(
         acy_slp_objects = ConnectLon(acy_slp_objects)
 
     end_time = time.time()
-    logging.debug(
+    logger.debug(
         f"{Fore.GREEN}======> 'SLP cyclone/anticyclone tracking: {(end_time - start_time):.2f} seconds \n"
     )
     start_time = time.time()
@@ -245,7 +247,7 @@ def CY_ACY_slp_tracking(
     #####################################################################
 
     if nc_file is not None:
-        logging.debug(f"{Style.BRIGHT} Save SLP objects into a netCDF")
+        logger.debug(f"{Style.BRIGHT} Save SLP objects into a netCDF")
 
         fino = xr.Dataset(
             {
@@ -269,11 +271,11 @@ def CY_ACY_slp_tracking(
         )
 
         end_time = time.time()
-        logging.debug(
+        logger.debug(
             f"{Style.BRIGHT} ======> 'Writing SLP files: {(end_time - start_time):.2f} seconds \n"
         )
 
     else:
-        logging.debug(f"{Fore.YELLOW}No writing files required, output file name is empty")
+        logger.debug(f"{Fore.YELLOW}No writing files required, output file name is empty")
 
     return cy_slp_objects, acy_slp_objects
