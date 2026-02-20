@@ -1,11 +1,14 @@
 import ast
 import glob
+import os
 
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy.stats import linregress, t
+
+import atmotrack_config as cfg
 
 
 def add_trend_with_ci(ax, years, data, scale_factor=10, color="k", label=""):
@@ -141,8 +144,10 @@ def create_annual_plot_df(df):
 
 
 def main():
+    plots_dir = cfg.plots_dir
+    os.makedirs(plots_dir, exist_ok=True)
 
-    stat_files = sorted(glob.glob("./events_stats/events_stats_????.csv"))
+    stat_files = sorted(glob.glob(f"{cfg.stats_dir}/events_stats_????.csv"))
 
     dfs = []
     for stat_fin in stat_files:
@@ -183,7 +188,6 @@ def main():
     # --- Load hires precip ---
     # annual_hires = pd.read_csv("annual_ws_pr_hires.csv.csv")
     # annual_lores = pd.read_csv("annual_ws_pr_lores.csv.csv")
-    # import pdb; pdb.set_trace()  # fmt: skip
     # --- Load the watershed mask ---
     watersheds = {"CAT": 22, "EBR": 23, "JUC": 16, "BAL": 8, "SEG": 7, "SUR": 21, "MED": 25}
 
@@ -224,7 +228,7 @@ def main():
     ax.set_ylabel("Number of Cut-off Lows")
     ax.legend()
     ax.grid()
-    fig.savefig("Annual_count_COL.png")
+    fig.savefig(os.path.join(plots_dir, "Annual_count_COL.png"))
     plt.close()
 
     #####################################################################
@@ -252,7 +256,7 @@ def main():
     ax.set_ylim(-1, 40)
     ax.legend(loc="upper left", bbox_to_anchor=(1, 1))  # Moves legend outside the plot
     ax.grid()
-    fig.savefig("Max_precip_per_COL.png")
+    fig.savefig(os.path.join(plots_dir, "Max_precip_per_COL.png"))
 
     ## Precipitation maximum for each Cut-off low (NO MEDITERRANEAN) ##
 
@@ -275,7 +279,7 @@ def main():
     ax.set_ylim(-1, 40)
     ax.legend(loc="upper left", bbox_to_anchor=(1, 1))  # Moves legend outside the plot
     ax.grid()
-    fig.savefig("Max_precip_per_COL_NoMED.png")
+    fig.savefig(os.path.join(plots_dir, "Max_precip_per_COL_NoMED.png"))
 
     ## Plotting total precipitation per watershed and year
 
@@ -313,7 +317,7 @@ def main():
 
         add_trend_with_ci(ax, dataplot.index, dataplot.values, scale_factor=10)
 
-    fig.savefig("Max_Acc_precip_from_one_COL.png")
+    fig.savefig(os.path.join(plots_dir, "Max_Acc_precip_from_one_COL.png"))
 
     ## Plotting mean precipitation per watershed, year and COL
     df = data_multi.loc[:, ["year", "month", "object_id", "mean_precip_ws_lores"]]
@@ -348,7 +352,7 @@ def main():
         ax.grid()
 
         add_trend_with_ci(ax, dataplot.index, dataplot.values, scale_factor=10)
-    fig.savefig("Annual_precip_from_COLs.png")
+    fig.savefig(os.path.join(plots_dir, "Annual_precip_from_COLs.png"))
 
     #####################################################################
     #####################################################################
@@ -382,7 +386,7 @@ def main():
     ax.set_ylim(-1, 40)
     ax.legend(loc="upper left", bbox_to_anchor=(1, 1))  # Moves legend outside the plot
     ax.grid()
-    fig.savefig("Max_precip_per_COL_hires.png")
+    fig.savefig(os.path.join(plots_dir, "Max_precip_per_COL_hires.png"))
 
     ## Plotting maximum accumulated precipitation per watershed and year
 
@@ -421,7 +425,7 @@ def main():
 
         add_trend_with_ci(ax, dataplot.index, dataplot.values, scale_factor=10)
 
-    fig.savefig("Max_Acc_precip_from_one_COL_hires.png")
+    fig.savefig(os.path.join(plots_dir, "Max_Acc_precip_from_one_COL_hires.png"))
 
     ## Plotting mean precipitation per watershed, year and COL
     df = data_multi.loc[:, ["year", "month", "object_id", "mean_precip_ws_hires"]]
@@ -459,7 +463,7 @@ def main():
 
         add_trend_with_ci(ax, dataplot.index, dataplot.values, scale_factor=10)
 
-    fig.savefig("Annual_precip_from_COLs_hires.png")
+    fig.savefig(os.path.join(plots_dir, "Annual_precip_from_COLs_hires.png"))
 
     #####################################################################
     #####################################################################
@@ -489,7 +493,7 @@ def main():
     ax.set_title("Seasonality of COLs - Average number of COLs per month")
     ax.grid()
     plt.tight_layout()
-    plt.savefig("COL_count_seasonality.png")
+    plt.savefig(os.path.join(plots_dir, "COL_count_seasonality.png"))
 
 
 if __name__ == "__main__":

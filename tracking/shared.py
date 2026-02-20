@@ -144,6 +144,9 @@ def calc_object_characteristics(
     num_objects = int(var_objects.max())
     object_indices = ndimage.find_objects(var_objects)
 
+    if num_objects < 1:
+        return {}
+
     if num_objects >= 1:
         objects_charac = {}
         logging.debug("            Loop over " + str(num_objects) + " objects")

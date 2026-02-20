@@ -11,7 +11,6 @@ For each annual ERA5 file in ``data_era5/``:
 All parameters (thresholds, domain, paths) are read from ``config.toml``.
 """
 
-import logging
 import os
 import time
 from glob import glob
@@ -29,6 +28,7 @@ from utils import get_logger
 ###########################################################
 def main():
     """Loop over available annual files and track COLs in parallel."""
+    get_logger("atmotrack", log_file="out.log")
     os.makedirs(cfg.data_tracking, exist_ok=True)
     filesin = sorted(glob(f"{cfg.data_era5}/era5_daily_500hPa_????.nc"))
     Parallel(n_jobs=-1)(delayed(cutofflow_tracking)(fin_name) for fin_name in filesin)
@@ -55,7 +55,7 @@ def cutofflow_tracking(z500_finname):
     pr_data_max = pr.tp.resample(valid_time="6h").max().values * 1000.0
 
     if z500_data.shape != pr_data.shape:
-        logging.debug(f"WARNING: Data shapes do not match: {z500_data.shape} vs {pr_data.shape}")
+        logger.debug(f"WARNING: Data shapes do not match: {z500_data.shape} vs {pr_data.shape}")
         diff_times = z500_data.shape[0] - pr_data.shape[0]
         pr_data = np.pad(pr_data, ((diff_times, 0), (0, 0), (0, 0)), constant_values=0)
         pr_data_max = np.pad(pr_data_max, ((diff_times, 0), (0, 0), (0, 0)), constant_values=0)
@@ -69,7 +69,7 @@ def cutofflow_tracking(z500_finname):
         freq="6h",
     )
 
-    logging.debug(f"Loading data: {time.time() - start_time:.2f} s")
+    logger.debug(f"Loading data: {time.time() - start_time:.2f} s")
     start_time = time.time()
 
     fileout_col = z500_finname.replace("500hPa", "col_z500").replace(
@@ -98,9 +98,4 @@ def cutofflow_tracking(z500_finname):
 
 ###############################################################################
 if __name__ == "__main__":
-    logging.basicConfig(
-        format="%(asctime)s | %(levelname)s: %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-        level=logging.DEBUG,
-    )
     main()
