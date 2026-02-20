@@ -10,7 +10,6 @@ For each annual ERA5 500 hPa file in ``data_era5/``:
 All parameters (thresholds, paths) are read from ``config.toml``.
 """
 
-import logging
 import os
 import time
 from glob import glob
@@ -28,6 +27,7 @@ from utils import get_logger
 ###########################################################
 def main():
     """Loop over available annual files and track upper-level CY/ACY in parallel."""
+    get_logger("atmotrack", log_file="out.log")
     os.makedirs(cfg.data_tracking, exist_ok=True)
     filesin = sorted(glob(f"{cfg.data_era5}/era5_daily_500hPa_????.nc"))
     Parallel(n_jobs=-1)(delayed(cy_z500_tracking)(fin_name) for fin_name in filesin)
@@ -53,7 +53,7 @@ def cy_z500_tracking(z500_finname):
         freq="6h",
     )
 
-    logging.debug(f"Loading data: {time.time() - start_time:.2f} s")
+    logger.debug(f"Loading data: {time.time() - start_time:.2f} s")
 
     fileout = z500_finname.replace("500hPa", "cy_z500").replace(cfg.data_era5, cfg.data_tracking)
 
@@ -64,9 +64,4 @@ def cy_z500_tracking(z500_finname):
 
 ###############################################################################
 if __name__ == "__main__":
-    logging.basicConfig(
-        format="%(asctime)s | %(levelname)s: %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-        level=logging.INFO,
-    )
     main()

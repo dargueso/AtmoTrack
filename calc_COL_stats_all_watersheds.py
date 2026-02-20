@@ -1,3 +1,4 @@
+import argparse
 import glob
 import logging
 import os
@@ -42,13 +43,17 @@ def deaccumulate_era5land(ds):
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Compute per-COL precipitation statistics.")
+    parser.add_argument("--year-start", type=int, default=1940, help="First year to process")
+    parser.add_argument("--year-end", type=int, default=2024, help="Last year to process")
+    args = parser.parse_args()
 
     os.makedirs(cfg.stats_dir, exist_ok=True)
 
     # Start a local Dask cluster
-    Client(n_workers=8, threads_per_worker=2, memory_limit="16GB")
+    client = Client(n_workers=8, threads_per_worker=2, memory_limit="16GB")  # noqa: F841
 
-    years = np.arange(1940, 2025)
+    years = np.arange(args.year_start, args.year_end + 1)
     col_min_dur = cfg.col_min_dur
     DT = cfg.DT
 

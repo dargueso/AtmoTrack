@@ -174,6 +174,44 @@ def test_col_tracking():
     print(f"PASS  col_tracking  (col labels: {col.max()})")
 
 
+def test_front_tracking():
+    """Front_tracking returns an array of the correct shape."""
+    from tracking_functions import Front_tracking
+
+    fr = Front_tracking(
+        _wind(10.0),  # u850
+        _wind(10.0),  # v850
+        _temp(270.0),  # t850
+        _TIMES,
+        _LON2D,
+        _LAT2D,
+    )
+
+    assert fr.shape == (_NT, _NLAT, _NLON), f"front shape: {fr.shape}"
+    assert fr.min() >= 0, "front_objects contains negative IDs"
+    print(f"PASS  front_tracking  (front labels: {fr.max()})")
+
+
+def test_mcs_tracking():
+    """MCS_tracking returns a dict and an array of the correct shape.
+
+    Uses high BT values (280 K, well above the 241 K cloud-shield threshold)
+    and low precipitation so that no objects are detected — this keeps the
+    test fast and avoids needing cfg.path_in to exist on disk.
+    """
+    from tracking_functions import MCS_tracking
+
+    pr = _precip()  # low values → no PR objects above threshold
+    bt = np.full((_NT, _NLAT, _NLON), 280.0)  # all > 241 K → no cloud shield
+
+    grMCSs, mcs_objs = MCS_tracking(pr, bt, _TIMES, _LON2D, _LAT2D, nc_file=None)
+
+    assert isinstance(grMCSs, dict), f"grMCSs should be dict, got {type(grMCSs)}"
+    assert mcs_objs.shape == (_NT, _NLAT, _NLON), f"mcs_objs shape: {mcs_objs.shape}"
+    assert mcs_objs.min() >= 0, "mcs_objects contains negative IDs"
+    print(f"PASS  mcs_tracking  (mcs labels: {mcs_objs.max()})")
+
+
 # ---------------------------------------------------------------------------
 # Standalone runner (no pytest required)
 # ---------------------------------------------------------------------------
@@ -187,7 +225,14 @@ if __name__ == "__main__":
     except ImportError:
         pass
 
-    tests = [test_imports, test_cy_z500_tracking, test_slp_tracking, test_col_tracking]
+    tests = [
+        test_imports,
+        test_cy_z500_tracking,
+        test_slp_tracking,
+        test_col_tracking,
+        test_front_tracking,
+        test_mcs_tracking,
+    ]
     failed = 0
     for fn in tests:
         try:

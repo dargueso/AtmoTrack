@@ -29,6 +29,9 @@ hires_pr_pattern = "/home/dargueso/ERA5/ERA5land/era5land_daily_PR_*.nc"
 # Output directory for per-event statistics CSV files
 stats_dir = "./events_stats"
 
+# Output directory for plot PNG files
+plots_dir = "./plots"
+
 # MCS tracking output path prefix (used by MCS_tracking in tracking_functions)
 path_in = "./data_tracking"
 
