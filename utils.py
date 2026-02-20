@@ -93,6 +93,7 @@ def get_logger(
         return logger
 
     logger.setLevel(level)
+    logger.propagate = False  # prevent double-printing via root logger
 
     # Console handler — colored when TTY
     sh = logging.StreamHandler()
