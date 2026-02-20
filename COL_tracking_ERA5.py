@@ -46,7 +46,8 @@ def main():
         f for f in glob(f"{cfg.data_era5}/era5_daily_500hPa_????.nc")
         if args.year_start <= int(f[-7:-3]) <= args.year_end
     )
-    Parallel(n_jobs=-1)(delayed(cutofflow_tracking)(fin_name, args.verbose) for fin_name in filesin)
+    n_jobs = min(len(filesin), os.cpu_count() or 1)
+    Parallel(n_jobs=n_jobs)(delayed(cutofflow_tracking)(fin_name, args.verbose) for fin_name in filesin)
 
 
 ###########################################################
