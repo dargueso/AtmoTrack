@@ -36,6 +36,8 @@ def main():
                         help="Last year to process (default: 2024)")
     parser.add_argument("--verbose", "-v", action="store_true",
                         help="Enable DEBUG-level logging")
+    parser.add_argument("--jobs", "-j", type=int, default=8, metavar="N",
+                        help="Number of parallel workers (default: 8)")
     args = parser.parse_args()
 
     get_logger("atmotrack", log_file="out.log",
@@ -45,7 +47,7 @@ def main():
         f for f in glob(f"{cfg.data_era5}/era5_daily_SLP_????.nc")
         if args.year_start <= int(f[-7:-3]) <= args.year_end
     )
-    n_jobs = min(len(filesin), os.cpu_count() or 1)
+    n_jobs = min(len(filesin), args.jobs)
     for _var in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
         os.environ[_var] = "1"
     Parallel(n_jobs=n_jobs)(delayed(slp_tracking)(fin_name, args.verbose) for fin_name in filesin)
