@@ -47,10 +47,10 @@ def main():
         if args.year_start <= int(f[-7:-3]) <= args.year_end
     )
     n_jobs = min(len(filesin), os.cpu_count() or 1)
-    # Divide CPUs equally among workers to avoid BLAS thread contention
-    n_threads = max(1, (os.cpu_count() or 1) // n_jobs)
+    # Limit BLAS threads to 1 per worker to avoid thread contention on
+    # many-core machines where numpy/scipy would otherwise claim all CPUs.
     for _var in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
-        os.environ[_var] = str(n_threads)
+        os.environ[_var] = "1"
     Parallel(n_jobs=n_jobs)(delayed(cutofflow_tracking)(fin_name, args.verbose) for fin_name in filesin)
 
 
