@@ -1,14 +1,17 @@
 import ast
 import glob
 import os
+import sys
 
-import matplotlib.dates as mdates
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import matplotlib.dates as mdates  # noqa: E402
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy.stats import linregress, t
 
-import atmotrack_config as cfg
+import atmotrack_config as cfg  # noqa: E402
 
 
 def add_trend_with_ci(ax, years, data, scale_factor=10, color="k", label=""):
