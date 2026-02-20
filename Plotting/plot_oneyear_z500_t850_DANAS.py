@@ -12,8 +12,10 @@
 
 import argparse
 import os
+import sys
 import warnings
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import cartopy.crs as ccrs
 import matplotlib.pyplot as plt
 import numpy as np
@@ -22,18 +24,29 @@ import seaborn as sns
 import xarray as xr
 from matplotlib.colors import BoundaryNorm
 
+import atmotrack_config as cfg  # noqa: E402
+
 warnings.filterwarnings("ignore", category=RuntimeWarning, module="shapely")
 
 # Set up the argument parser to get the date from the command line
 parser = argparse.ArgumentParser(description="Plot Z500 and T850 with wind barbs.")
 parser.add_argument("year", type=str, help="Year in YYYY format, e.g. 1987")
+parser.add_argument(
+    "--input",
+    default=None,
+    help="Input netCDF file (default: DATA_TRACKING/era5_daily_col_z500_YEAR.nc)",
+)
+parser.add_argument(
+    "--output-dir", default=None, dest="output_dir", help="Output directory (default: YEAR)"
+)
 args = parser.parse_args()
 
-# Construct the input file name based on the provided date
-filein = f"./data_tracking/era5_daily_col_z500_{args.year}.nc"
-
-
-folder = args.year
+filein = (
+    args.input
+    if args.input is not None
+    else f"{cfg.data_tracking}/era5_daily_col_z500_{args.year}.nc"
+)
+folder = args.output_dir if args.output_dir is not None else str(args.year)
 if not os.path.exists(folder):
     os.makedirs(folder)
 

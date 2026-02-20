@@ -152,9 +152,23 @@ script's `main()` function.
 
 ## Core library
 
-`tracking_functions.py` contains all detection, labeling, and tracking
-algorithms. Import individual functions from it rather than running it
-directly.
+The `tracking/` package contains all detection, labeling, and tracking
+algorithms, split by concern:
+
+| Module | Contents |
+|---|---|
+| `tracking/shared.py` | Grid helpers, object utilities (`haversine`, `calc_grid_distance_area`, `ConnectLon`, `BreakupObjects`, `clean_up_objects`, …) |
+| `tracking/cy_z500.py` | `CY_ACY_z500_tracking` — 500 hPa cyclone/anticyclone tracking |
+| `tracking/cy_slp.py` | `watershed_2d_overlap`, `CY_ACY_slp_tracking` — surface cyclone/anticyclone tracking |
+| `tracking/col.py` | `Front_tracking`, `COL_tracking` — fronts and cut-off lows |
+| `tracking/mcs.py` | `MCS_tracking` — mesoscale convective systems |
+
+Import directly from the package or from the backward-compatible shim:
+
+```python
+from tracking import COL_tracking, CY_ACY_z500_tracking   # preferred
+from tracking_functions import COL_tracking                 # also works
+```
 
 `utils.py` provides the shared logger and TTY-aware ANSI colour helpers used
 by all scripts.
