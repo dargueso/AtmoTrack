@@ -13,4 +13,5 @@ scikit-image>=0.21
 metpy>=1.5
 joblib>=1.3
 cdsapi>=0.7           # only needed for download_ERA5.py
+pytest>=7.0           # only needed for test_smoke.py
 # tomli>=2.0        # only needed for Python < 3.11
