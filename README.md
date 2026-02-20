@@ -7,12 +7,36 @@ Mesoscale Convective Systems (MCS), and fronts.
 
 ---
 
+## Citing AtmoTrack
+
+If you use AtmoTrack in published research, please cite it:
+
+> Argüeso, D. (2024). *AtmoTrack: Atmospheric system tracking from ERA5
+> reanalysis data*. https://github.com/dargueso/AtmoTrack
+
+A machine-readable citation is available in `CITATION.cff` (GitHub shows a
+**"Cite this repository"** button in the sidebar that exports BibTeX, APA,
+and other formats automatically).
+
+---
+
 ## Requirements
 
 Python ≥ 3.11 (uses built-in `tomllib`; for 3.9/3.10 install `tomli`).
 
+### With conda (recommended)
+
 ```bash
-pip install -r requirements.txt
+conda env create -f environment.yml
+conda activate atmotrack
+```
+
+### With pip
+
+```bash
+pip install -e ".[dev]"          # installs project + dev tools (pytest, ruff)
+pip install -e ".[dev,download]" # also installs cdsapi for download_ERA5.py
+pip install -e ".[dev,misc]"     # also installs cartopy/geopandas for Misc/ scripts
 ```
 
 ---
@@ -188,6 +212,18 @@ python Misc/select_region_ERA5_shapefile.py \
 | `Misc/plot_shapefile_multiple_regions.py` | Visualise all regions in a shapefile |
 
 All accept `--help` for full usage information.
+
+---
+
+## Linting
+
+[ruff](https://docs.astral.sh/ruff/) is configured in `pyproject.toml`:
+
+```bash
+ruff check .        # check for issues
+ruff format .       # auto-format
+ruff check --fix .  # auto-fix safe issues
+```
 
 ---
 

@@ -19,8 +19,9 @@ import xarray as xr
 
 import metpy.calc as calc
 
-from scipy.ndimage import filters, distance_transform_edt
 from scipy import ndimage
+from scipy.ndimage import distance_transform_edt
+import scipy.ndimage as filters
 
 from skimage.segmentation import watershed
 from skimage.feature import peak_local_max
@@ -196,7 +197,7 @@ def calc_object_characteristics(
 
                 # Track lat/lon
                 obj_mass_center = \
-                np.array([ndimage.measurements.center_of_mass(object_slice[tt,:,:]==(iobj+1)) for tt in range(object_slice.shape[0])])
+                np.array([ndimage.center_of_mass(object_slice[tt,:,:]==(iobj+1)) for tt in range(object_slice.shape[0])])
 
                 if np.any(np.isnan(obj_mass_center)):
                     raise ValueError("mass center array contains NaNs")
@@ -597,7 +598,7 @@ def Front_tracking(u850, v850, t850, times, Lon, Lat, Mask=None):
     Tgrad_zero = 0.45  # Assumed threshold in K/(100 km)
     
     # Calculate the Coriolis parameter
-    CoriolisPar = np.array(calc.coriolis_parameter(np.deg2rad(Lat)))
+    CoriolisPar = calc.coriolis_parameter(np.deg2rad(Lat)).magnitude
     
     # Calculate the Frontal Diagnostic
     Frontal_Diagnostic = np.array(Fstar / (CoriolisPar * Tgrad_zero))
@@ -1522,7 +1523,7 @@ def COL_tracking(cy_z500_objects,
 
 
             # CRITERIA 4) Check if system is within region
-            obj_mass_center = ndimage.measurements.center_of_mass(object_slice[tt,:,:])
+            obj_mass_center = ndimage.center_of_mass(object_slice[tt,:,:])
             obj_track_lat=lat_slice[int(round(obj_mass_center[0])),int(round(obj_mass_center[1]))]
             obj_track_lon=lon_slice[int(round(obj_mass_center[0])),int(round(obj_mass_center[1]))]
             if (obj_track_lat < col_region[2] or

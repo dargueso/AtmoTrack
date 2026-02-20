@@ -1,0 +1,26 @@
+cff-version: 1.2.0
+message: "If you use AtmoTrack in published research, please cite it as below."
+type: software
+title: "AtmoTrack: Atmospheric system tracking from ERA5 reanalysis data"
+version: 1.0.0
+date-released: "2024-01-01"
+license: MIT
+authors:
+  - family-names: Argüeso
+    given-names: Daniel
+    email: d.argueso@uib.es
+    affiliation: "Universitat de les Illes Balears"
+    orcid: "https://orcid.org/0000-0002-2049-1890"
+repository-code: "https://github.com/dargueso/AtmoTrack"
+abstract: >
+  AtmoTrack tracks atmospheric systems — Cut-Off Lows (COL),
+  upper-level and surface cyclones/anticyclones, Mesoscale Convective
+  Systems (MCS), and fronts — from ERA5 reanalysis data over a
+  configurable geographic domain and time period.
+keywords:
+  - atmospheric-science
+  - ERA5
+  - cut-off-lows
+  - cyclone-tracking
+  - reanalysis
+  - python
