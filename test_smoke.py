@@ -29,7 +29,9 @@ _LON = np.arange(-30.0, 20.25, 0.5)  # −30 → 20 °E → 101 points
 _LON2D, _LAT2D = np.meshgrid(_LON, _LAT)
 
 # 7 days × 4 timesteps/day = 28 steps at 6-hourly frequency
-_TIMES = pd.date_range("2024-10-01 00:00", periods=28, freq="6h")
+# Arbitrary start date — the tracking functions only use the number of steps,
+# not the actual calendar values.
+_TIMES = pd.date_range("2000-01-01 00:00", periods=28, freq="6h")
 _NT, _NLAT, _NLON = len(_TIMES), len(_LAT), len(_LON)
 
 _RNG = np.random.default_rng(42)
