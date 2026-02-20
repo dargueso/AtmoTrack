@@ -72,4 +72,4 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["atmotrack_config", "tracking_functions", "constants", "utils"]
+known-first-party = ["atmotrack_config", "tracking", "tracking_functions", "constants", "utils"]

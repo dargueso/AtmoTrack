@@ -12,7 +12,6 @@
 
 import argparse
 import os
-import re
 import warnings
 
 import cartopy.crs as ccrs
@@ -28,17 +27,14 @@ warnings.filterwarnings("ignore", category=RuntimeWarning, module="shapely")
 # Set up the argument parser to get the date from the command line
 parser = argparse.ArgumentParser(description="Plot Z500 and T850 with wind barbs.")
 parser.add_argument("date", type=str, help="Date in YYYY-MM-DD format, e.g. 1987-11-03")
+parser.add_argument("--input", default=None, help="Input netCDF file (default: extracted_DATE.nc)")
+parser.add_argument(
+    "--output-dir", default=None, dest="output_dir", help="Output directory (default: DATE)"
+)
 args = parser.parse_args()
 
-# Construct the input file name based on the provided date
-filein = f"./extracted_{args.date}.nc"
-
-match = re.search(r"(\d{4})-(\d{2})-(\d{2})", filein)
-if match:
-    date_str = "".join(match.groups())
-    print(date_str)
-
-folder = date_str
+filein = args.input if args.input is not None else f"extracted_{args.date}.nc"
+folder = args.output_dir if args.output_dir is not None else args.date
 if not os.path.exists(folder):
     os.makedirs(folder)
 
