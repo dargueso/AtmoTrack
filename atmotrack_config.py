@@ -41,3 +41,5 @@ for _section_values in _cfg.values():
         globals()[_key] = _val
 
 del _f, _cfg, _config_path, _section_values, _key, _val
+
+__version__ = "1.0.0"
