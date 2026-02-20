@@ -45,13 +45,14 @@ def main():
         f for f in glob(f"{cfg.data_era5}/era5_daily_500hPa_????.nc")
         if args.year_start <= int(f[-7:-3]) <= args.year_end
     )
-    Parallel(n_jobs=-1)(delayed(cy_z500_tracking)(fin_name) for fin_name in filesin)
+    Parallel(n_jobs=-1)(delayed(cy_z500_tracking)(fin_name, args.verbose) for fin_name in filesin)
 
 
 ###########################################################
-def cy_z500_tracking(z500_finname):
+def cy_z500_tracking(z500_finname, verbose=False):
     """Track 500 hPa cyclones/anticyclones for a single annual file."""
-    logger = get_logger("atmotrack", log_file="out.log")
+    logger = get_logger("atmotrack", log_file="out.log",
+                        level=logging.DEBUG if verbose else logging.INFO)
     logger.info(f"Analyzing {z500_finname}")
     start_time = time.time()
 
