@@ -10,19 +10,19 @@ For each annual ERA5 file in ``data_era5/``:
 
 All parameters (thresholds, domain, paths) are read from ``config.toml``.
 """
-from glob import glob
+
+import logging
 import os
 import time
-import logging
+from glob import glob
+
 import numpy as np
-
-import xarray as xr
 import pandas as pd
-
+import xarray as xr
 from joblib import Parallel, delayed
 
 import atmotrack_config as cfg
-from tracking_functions import CY_ACY_z500_tracking, COL_tracking
+from tracking_functions import COL_tracking, CY_ACY_z500_tracking
 from utils import get_logger
 
 
@@ -44,27 +44,21 @@ def cutofflow_tracking(z500_finname):
     z500 = xr.open_dataset(z500_finname).squeeze()
     z200 = xr.open_dataset(z500_finname.replace("500hPa", "200hPa")).squeeze()
     z850 = xr.open_dataset(z500_finname.replace("500hPa", "850hPa")).squeeze()
-    pr   = xr.open_dataset(z500_finname.replace("500hPa", "PR")).squeeze()
+    pr = xr.open_dataset(z500_finname.replace("500hPa", "PR")).squeeze()
 
-    z500_data   = z500.z.values
-    u200_data   = z200.u.values
-    t850_data   = z850.t.values
-    u850_data   = z850.u.values
-    v850_data   = z850.v.values
-    pr_data     = pr.tp.resample(valid_time="6h").sum().values * 1000.0
+    z500_data = z500.z.values
+    u200_data = z200.u.values
+    t850_data = z850.t.values
+    u850_data = z850.u.values
+    v850_data = z850.v.values
+    pr_data = pr.tp.resample(valid_time="6h").sum().values * 1000.0
     pr_data_max = pr.tp.resample(valid_time="6h").max().values * 1000.0
 
     if z500_data.shape != pr_data.shape:
-        logging.debug(
-            f"WARNING: Data shapes do not match: {z500_data.shape} vs {pr_data.shape}"
-        )
+        logging.debug(f"WARNING: Data shapes do not match: {z500_data.shape} vs {pr_data.shape}")
         diff_times = z500_data.shape[0] - pr_data.shape[0]
-        pr_data = np.pad(
-            pr_data, ((diff_times, 0), (0, 0), (0, 0)), constant_values=0
-        )
-        pr_data_max = np.pad(
-            pr_data_max, ((diff_times, 0), (0, 0), (0, 0)), constant_values=0
-        )
+        pr_data = np.pad(pr_data, ((diff_times, 0), (0, 0), (0, 0)), constant_values=0)
+        pr_data_max = np.pad(pr_data_max, ((diff_times, 0), (0, 0), (0, 0)), constant_values=0)
 
     lat = z500.latitude.values
     lon = z500.longitude.values
@@ -82,9 +76,7 @@ def cutofflow_tracking(z500_finname):
         cfg.data_era5, cfg.data_tracking
     )
 
-    cy_z500_objects, _ = CY_ACY_z500_tracking(
-        z500_data, times, lon2d, lat2d, nc_file=None
-    )
+    cy_z500_objects, _ = CY_ACY_z500_tracking(z500_data, times, lon2d, lat2d, nc_file=None)
 
     _ = COL_tracking(
         cy_z500_objects,

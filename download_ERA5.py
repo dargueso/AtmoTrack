@@ -31,6 +31,7 @@ Usage examples:
   # Write to a custom directory instead of the one in config.toml
   python download_ERA5.py --year-start 2020 --year-end 2024 --outdir /scratch/era5
 """
+
 import argparse
 import logging
 import pathlib
@@ -111,6 +112,7 @@ DATASETS = {
 # Core helpers
 # ---------------------------------------------------------------------------
 
+
 def download_month(client, ds_key, year, month, monthly_dir, area):
     """Submit one CDS request for a single month. Returns the output Path.
 
@@ -146,14 +148,14 @@ def download_month(client, ds_key, year, month, monthly_dir, area):
 def concatenate_annual(monthly_files, annual_path):
     """Concatenate per-month NetCDFs into one annual file."""
     logging.info(f"    Concatenating {len(monthly_files)} months → {annual_path.name}")
-    with xr.open_mfdataset(sorted(str(f) for f in monthly_files),
-                           combine="by_coords") as ds:
+    with xr.open_mfdataset(sorted(str(f) for f in monthly_files), combine="by_coords") as ds:
         ds.to_netcdf(str(annual_path))
 
 
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
+
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -163,38 +165,47 @@ def parse_args():
 
     year_group = parser.add_mutually_exclusive_group(required=True)
     year_group.add_argument(
-        "--year-start", type=int,
+        "--year-start",
+        type=int,
         help="First year to download (use together with --year-end)",
     )
     year_group.add_argument(
-        "--years", type=int, nargs="+",
+        "--years",
+        type=int,
+        nargs="+",
         metavar="YEAR",
         help="Explicit list of years to download",
     )
     parser.add_argument(
-        "--year-end", type=int,
+        "--year-end",
+        type=int,
         help="Last year to download, inclusive (required with --year-start)",
     )
     parser.add_argument(
-        "--datasets", nargs="+", choices=list(DATASETS), default=list(DATASETS),
+        "--datasets",
+        nargs="+",
+        choices=list(DATASETS),
+        default=list(DATASETS),
         metavar="DATASET",
-        help=(
-            "Datasets to download. Choices: "
-            + ", ".join(DATASETS)
-            + " (default: all)"
-        ),
+        help=("Datasets to download. Choices: " + ", ".join(DATASETS) + " (default: all)"),
     )
     parser.add_argument(
-        "--area", type=float, nargs=4, default=DEFAULT_AREA,
+        "--area",
+        type=float,
+        nargs=4,
+        default=DEFAULT_AREA,
         metavar=("N", "W", "S", "E"),
         help="Bounding box [N W S E] in degrees (default: %(default)s)",
     )
     parser.add_argument(
-        "--outdir", type=pathlib.Path, default=pathlib.Path(cfg.data_era5),
+        "--outdir",
+        type=pathlib.Path,
+        default=pathlib.Path(cfg.data_era5),
         help="Output directory for annual files (default: data_era5 from config.toml)",
     )
     parser.add_argument(
-        "--keep-monthly", action="store_true",
+        "--keep-monthly",
+        action="store_true",
         help="Keep intermediate per-month files after annual concatenation",
     )
     return parser.parse_args()
@@ -249,7 +260,7 @@ def main():
             if not args.keep_monthly:
                 for f in monthly_files:
                     f.unlink(missing_ok=True)
-                logging.info(f"    Monthly intermediates removed")
+                logging.info("    Monthly intermediates removed")
 
     # Remove the monthly staging directory if it is now empty
     if not args.keep_monthly:

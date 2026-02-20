@@ -16,6 +16,7 @@ Run with pytest (recommended):
 Or run directly as a plain Python script:
     python test_smoke.py
 """
+
 import sys
 
 import numpy as np
@@ -24,7 +25,7 @@ import pandas as pd
 # ---------------------------------------------------------------------------
 # Synthetic ERA5-like grid  (0.5° resolution, same domain as download_ERA5.py)
 # ---------------------------------------------------------------------------
-_LAT = np.arange(75.0, 9.75, -0.5)   # 75 → 10 °N  → 131 points
+_LAT = np.arange(75.0, 9.75, -0.5)  # 75 → 10 °N  → 131 points
 _LON = np.arange(-30.0, 20.25, 0.5)  # −30 → 20 °E → 101 points
 _LON2D, _LAT2D = np.meshgrid(_LON, _LAT)
 
@@ -41,6 +42,7 @@ _RNG = np.random.default_rng(42)
 # Synthetic field factories
 # ---------------------------------------------------------------------------
 
+
 def _z500():
     """Geopotential at 500 hPa [m²/s²].
 
@@ -50,11 +52,11 @@ def _z500():
     """
     z = np.empty((_NT, _NLAT, _NLON), dtype=np.float64)
     for t in range(_NT):
-        lon_c = -12.0 + t * 0.4          # trough drifts east from −12° to −1°
+        lon_c = -12.0 + t * 0.4  # trough drifts east from −12° to −1°
         dist2 = (_LON2D - lon_c) ** 2 + (_LAT2D - 40.0) ** 2
-        trough = -2_500.0 * np.exp(-dist2 / 20.0)   # ≈ 255 m deep
-        wave   =    500.0 * np.sin(2 * np.pi * _LON2D / 8.0)
-        z[t]   = 53_000.0 + trough + wave
+        trough = -2_500.0 * np.exp(-dist2 / 20.0)  # ≈ 255 m deep
+        wave = 500.0 * np.sin(2 * np.pi * _LON2D / 8.0)
+        z[t] = 53_000.0 + trough + wave
     return z
 
 
@@ -69,7 +71,7 @@ def _slp():
     for t in range(_NT):
         lon_c = -8.0 + t * 0.3
         dist2 = (_LON2D - lon_c) ** 2 + (_LAT2D - 42.0) ** 2
-        low    = -2_000.0 * np.exp(-dist2 / 15.0)   # ~20 hPa deep
+        low = -2_000.0 * np.exp(-dist2 / 15.0)  # ~20 hPa deep
         slp[t] = 101_325.0 + low
     return slp
 
@@ -93,16 +95,17 @@ def _precip():
 # Tests
 # ---------------------------------------------------------------------------
 
+
 def test_imports():
     """All AtmoTrack modules import without error and constants are correct."""
     import atmotrack_config as cfg
     import constants
     import tracking_functions  # noqa: F401
-    import utils               # noqa: F401
+    import utils  # noqa: F401
 
     assert abs(constants.const.g - 9.81) < 1e-9, "Gravity constant wrong"
     assert constants.const.earth_radius == 6_371_000, "Earth radius wrong"
-    assert hasattr(cfg, "DT"),          "cfg.DT missing"
+    assert hasattr(cfg, "DT"), "cfg.DT missing"
     assert hasattr(cfg, "col_min_dur"), "cfg.col_min_dur missing"
     print("PASS  imports")
 
@@ -114,13 +117,12 @@ def test_cy_z500_tracking():
     z500 = _z500()
     cy, acy = CY_ACY_z500_tracking(z500, _TIMES, _LON2D, _LAT2D, nc_file=None)
 
-    assert cy.shape  == (_NT, _NLAT, _NLON), f"cy shape: {cy.shape}"
+    assert cy.shape == (_NT, _NLAT, _NLON), f"cy shape: {cy.shape}"
     assert acy.shape == (_NT, _NLAT, _NLON), f"acy shape: {acy.shape}"
-    assert cy.min()  >= 0, "cy_objects contains negative IDs"
+    assert cy.min() >= 0, "cy_objects contains negative IDs"
     assert acy.min() >= 0, "acy_objects contains negative IDs"
 
-    print(f"PASS  cy_z500_tracking  "
-          f"(cy labels: {cy.max()},  acy labels: {acy.max()})")
+    print(f"PASS  cy_z500_tracking  (cy labels: {cy.max()},  acy labels: {acy.max()})")
 
 
 def test_slp_tracking():
@@ -130,13 +132,12 @@ def test_slp_tracking():
     slp = _slp()
     cy, acy = CY_ACY_slp_tracking(slp, _TIMES, _LON2D, _LAT2D, nc_file=None)
 
-    assert cy.shape  == (_NT, _NLAT, _NLON), f"cy_slp shape: {cy.shape}"
+    assert cy.shape == (_NT, _NLAT, _NLON), f"cy_slp shape: {cy.shape}"
     assert acy.shape == (_NT, _NLAT, _NLON), f"acy_slp shape: {acy.shape}"
-    assert cy.min()  >= 0, "cy_slp_objects contains negative IDs"
+    assert cy.min() >= 0, "cy_slp_objects contains negative IDs"
     assert acy.min() >= 0, "acy_slp_objects contains negative IDs"
 
-    print(f"PASS  slp_tracking  "
-          f"(cy labels: {cy.max()},  acy labels: {acy.max()})")
+    print(f"PASS  slp_tracking  (cy labels: {cy.max()},  acy labels: {acy.max()})")
 
 
 def test_col_tracking():
@@ -146,7 +147,7 @@ def test_col_tracking():
     required by COL_tracking, mirroring the real pipeline in
     COL_tracking_ERA5.py.
     """
-    from tracking_functions import CY_ACY_z500_tracking, COL_tracking
+    from tracking_functions import COL_tracking, CY_ACY_z500_tracking
 
     z500 = _z500()
     cy, _ = CY_ACY_z500_tracking(z500, _TIMES, _LON2D, _LAT2D, nc_file=None)
@@ -155,12 +156,12 @@ def test_col_tracking():
     col = COL_tracking(
         cy,
         z500,
-        _wind(20.0),    # u200
-        _wind(10.0),    # u850
-        _wind(10.0),    # v850
-        _temp(270.0),   # t850
-        pr,             # pr_data    (6-hourly sum)
-        pr,             # pr_data_max (6-hourly max; same array is fine for a smoke test)
+        _wind(20.0),  # u200
+        _wind(10.0),  # u850
+        _wind(10.0),  # v850
+        _temp(270.0),  # t850
+        pr,  # pr_data    (6-hourly sum)
+        pr,  # pr_data_max (6-hourly max; same array is fine for a smoke test)
         times=_TIMES,
         Lon=_LON2D,
         Lat=_LAT2D,
@@ -181,6 +182,7 @@ if __name__ == "__main__":
     # Try to run under pytest first; fall back to plain Python assertions.
     try:
         import pytest
+
         sys.exit(pytest.main([__file__, "-v"] + sys.argv[1:]))
     except ImportError:
         pass

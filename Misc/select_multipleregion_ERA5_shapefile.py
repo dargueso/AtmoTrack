@@ -20,8 +20,8 @@ Usage:
       --ocean-shp         /path/to/ocean_regions.shp \\
       --output            ./watershed_mask_medsea.nc
 """
+
 import argparse
-import sys
 
 import cartopy.crs as ccrs
 import geopandas as gpd
@@ -33,7 +33,6 @@ from cartopy import feature as cfeature
 from scipy.ndimage import binary_dilation
 
 import atmotrack_config as cfg
-
 
 # Selected watersheds for the Mediterranean region (region IDs in the shapefile)
 WATERSHEDS = {
@@ -58,23 +57,28 @@ def parse_args():
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
-        "--input", required=True,
+        "--input",
+        required=True,
         help="ERA5 NetCDF file used to read the lat/lon grid",
     )
     parser.add_argument(
-        "--lsm", required=True,
+        "--lsm",
+        required=True,
         help="ERA5 SST/land-sea mask NetCDF (variable: sst)",
     )
     parser.add_argument(
-        "--watershed-shp", required=True,
+        "--watershed-shp",
+        required=True,
         help="Watershed shapefile (.shp)",
     )
     parser.add_argument(
-        "--ocean-shp", required=True,
+        "--ocean-shp",
+        required=True,
         help="Ocean regions shapefile (.shp)",
     )
     parser.add_argument(
-        "--output", default=cfg.watershed_mask,
+        "--output",
+        default=cfg.watershed_mask,
         help=f"Output NetCDF path (default: {cfg.watershed_mask})",
     )
     return parser.parse_args()
@@ -139,9 +143,8 @@ def main():
 
     med_ws_mask = mask.isin(ws_values).astype(bool)
 
-    y, x = np.ogrid[-DILATION_RADIUS:DILATION_RADIUS + 1,
-                    -DILATION_RADIUS:DILATION_RADIUS + 1]
-    footprint = x ** 2 + y ** 2 <= DILATION_RADIUS ** 2
+    y, x = np.ogrid[-DILATION_RADIUS : DILATION_RADIUS + 1, -DILATION_RADIUS : DILATION_RADIUS + 1]
+    footprint = x**2 + y**2 <= DILATION_RADIUS**2
     dilated_mask = binary_dilation(med_ws_mask, structure=footprint)
     buffer_zone = dilated_mask & (~med_ws_mask)
 
@@ -151,9 +154,7 @@ def main():
     # ------------------------------------------------------------------ #
     # Export
     # ------------------------------------------------------------------ #
-    export = xr.Dataset(
-        {"region_mask": (["latitude", "longitude"], mask.data)}
-    )
+    export = xr.Dataset({"region_mask": (["latitude", "longitude"], mask.data)})
     export["longitude"] = ("longitude", longitude)
     export["latitude"] = ("latitude", latitude)
     export.to_netcdf(args.output)
@@ -170,17 +171,14 @@ def main():
     ax.add_feature(cfeature.BORDERS, zorder=2, linewidth=0.2, alpha=0.5)
     ax.add_feature(cfeature.RIVERS, zorder=2, linewidth=3, alpha=0.5)
 
-    contour = ax.contourf(longitude, latitude, mask.data,
-                          cmap="tab20c", zorder=3, alpha=0.8)
-    cbar = plt.colorbar(contour, ax=ax, orientation="horizontal",
-                        pad=0.05, aspect=50)
+    contour = ax.contourf(longitude, latitude, mask.data, cmap="tab20c", zorder=3, alpha=0.8)
+    cbar = plt.colorbar(contour, ax=ax, orientation="horizontal", pad=0.05, aspect=50)
     cbar.set_label("Region IDs", fontsize=12)
 
     gl = ax.gridlines(draw_labels=True, alpha=0.5, linestyle=":", color="k")
     gl.top_labels = False
     gl.right_labels = False
-    ax.set_extent([longitude.min(), longitude.max(),
-                   latitude.min(), latitude.max()])
+    ax.set_extent([longitude.min(), longitude.max(), latitude.min(), latitude.max()])
 
     plt.savefig("regions_map.png", dpi=200)
     print("Plot saved to regions_map.png")
