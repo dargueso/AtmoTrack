@@ -8,6 +8,33 @@ import numpy as np
 import xarray as xr
 import glob
 
+def add_trend_with_ci(ax, years, data, scale_factor=10, color='k', label=''):
+    """Compute linear trend with 95% CI and add to ax."""
+    x = np.array(years, dtype=float)
+    y = np.array(data, dtype=float)
+    mask = ~np.isnan(y)
+    x, y = x[mask], y[mask]
+    slope, intercept, _, _, std_err = linregress(x, y)
+    trend_line = slope * x + intercept
+    n = len(x)
+    s_err = np.sqrt(np.sum((y - trend_line) ** 2) / (n - 2))
+    t_val = t.ppf(0.975, n - 2)
+    mean_x = np.mean(x)
+    ssx = np.sum((x - mean_x) ** 2)
+    se_pred = s_err * np.sqrt(1 / n + (x - mean_x) ** 2 / ssx)
+    ci = t_val * se_pred
+    slope_err = t.ppf(0.975, n - 2) * std_err
+    ax.plot(x, trend_line, color=color, lw=1.5, linestyle='dotted', label='Linear Trend')
+    ax.fill_between(x, trend_line - ci, trend_line + ci, alpha=0.3, color='grey',
+                    label='95% Confidence Interval')
+    ax.text(0.95, 0.85,
+            f"Trend: {slope * scale_factor:.2f} ± {slope_err * scale_factor:.2f} /decade (95% CI)",
+            transform=ax.transAxes, fontsize=10, color='black',
+            verticalalignment='top', horizontalalignment='right',
+            bbox=dict(facecolor='white', alpha=0.8, edgecolor='none'))
+    return slope, slope_err
+
+
 def safe_literal_eval(x):
     """
     Safely evaluate a string representation of a Python literal.
@@ -168,43 +195,9 @@ def main():
     ax.step(annual_df.index, annual_df[('object_count', '')],where='mid', color='black', label='Cut-off Lows')
     obj_count_rolling_10 = annual_df[('object_count', '')].rolling(window=10, min_periods=10,center=True).mean()
     obj_count_rolling_30 = annual_df[('object_count', '')].rolling(window=30, min_periods=30,center=True).mean()
-    slope, intercept, r_value, p_value, std_err = linregress(annual_df.index, annual_df[('object_count', '')].values)
-    trend_line = slope * np.array(annual_df.index) + intercept
-    
-    # Calculate the residual standard error
-    x = annual_df.index
-    y = annual_df[('object_count', '')].values
-    n = len(x)
-    s_err = np.sqrt(np.sum((y - (slope * x + intercept))**2) / (n - 2))
-
-    # Calculate the t-value for a 95% confidence interval (two-tailed)
-    t_val = t.ppf(0.975, n - 2)
-    mean_x = np.mean(x)
-    # Sum of squares of the deviations of x
-    ssx = np.sum((x - mean_x)**2)
-
-    # Compute the standard error of the predicted values over the range of years
-    preds = np.array(years)
-    se_pred = s_err * np.sqrt(1/n + ((preds - mean_x)**2) / ssx)
-    # Margin of error at each x value
-    ci = t_val * se_pred
-
-    upper = trend_line + ci
-    lower = trend_line - ci
-
-    n = len(annual_df.index)
-    t_val_slope = t.ppf(0.975, n - 2)  # 95% confidence, two-tailed
-    slope_error = t_val_slope * std_err  # error for slope in mm/year
-
-
     ax.plot(annual_df.index, obj_count_rolling_10, color='red', label='10-year Rolling Mean')
     ax.plot(annual_df.index, obj_count_rolling_30, color='blue', label='30-year Rolling Mean')
-    ax.plot(annual_df.index, trend_line, color='black', linestyle='dotted', label='Linear Trend')
-    ax.fill_between(years, lower, upper, color='grey', alpha=0.3, label='95% Confidence Interval')
-    
-    trend_text = f"Trend: {slope*10:.2f} ± {slope_error*10:.2f} COLs/decade (95% CI)"
-    ax.text(0.95, 0.85, trend_text, transform=ax.transAxes, fontsize=10, color='black',
-            verticalalignment='top', horizontalalignment='right',bbox=dict(facecolor='white', alpha=0.8, edgecolor='none'))
+    add_trend_with_ci(ax, annual_df.index, annual_df[('object_count', '')].values, scale_factor=10)
 
     
     ax.set_title('Total Number of Cut-off Lows per Year')
@@ -224,50 +217,12 @@ def main():
     #df = df.drop([('max_precip_ws_lores', 'MED')], axis=1)
     df['max_value'] = df["max_precip_ws_lores"].max(axis=1)
     df['ws'] = df["max_precip_ws_lores"].idxmax(axis=1)
-    slope, intercept, r_value, p_value, std_err = linregress(df['year'],df['max_value'])
-    trend_line = slope * np.array(years) + intercept
-
-    # Calculate the residual standard error
-    x = np.array(df['year'])
-    y = np.array(df['max_value'])
-    n = len(x)
-    s_err = np.sqrt(np.sum((y - (slope * x + intercept))**2) / (n - 2))
-
-    # Calculate the t-value for a 95% confidence interval (two-tailed)
-    t_val = t.ppf(0.975, n - 2)
-    mean_x = np.mean(x)
-    # Sum of squares of the deviations of x
-    ssx = np.sum((x - mean_x)**2)
-
-    # Compute the standard error of the predicted values over the range of years
-    preds = np.array(years)
-    se_pred = s_err * np.sqrt(1/n + ((preds - mean_x)**2) / ssx)
-    # Margin of error at each x value
-    ci = t_val * se_pred
-
-    upper = trend_line + ci
-    lower = trend_line - ci
-
-    n = len(df['year'])
-    t_val_slope = t.ppf(0.975, n - 2)  # 95% confidence, two-tailed
-    slope_error = t_val_slope * std_err  # error for slope in mm/year
-
     fig = plt.figure(figsize=(15,5))
     ax = fig.add_subplot()
     for ws in watersheds_list:
         subset = df[df['ws'] == ws]
         ax.scatter(subset['year'], subset['max_value'], color=palette[ws], alpha=0.7,label=ws, s=100)
-    
-    # Plot the trend line
-    ax.plot(annual_df.index, trend_line, color='black', linestyle='dotted', label='Linear Trend')
-    # Add the confidence band
-    ax.fill_between(years, lower, upper, color='grey', alpha=0.3, label='95% Confidence Interval')
-    
-    trend_text = f"Trend: {slope*10:.2f} ± {slope_error*10:.2f} mm/decade (95% CI)"
-    ax.text(0.95, 0.85, trend_text, transform=ax.transAxes, fontsize=10, color='black',
-        verticalalignment='top', horizontalalignment='right',
-        bbox=dict(facecolor='white', alpha=0.8, edgecolor='none'))
-    
+    add_trend_with_ci(ax, df['year'], df['max_value'], scale_factor=10)
     ax.set_title("Maximum Precipitation per COL")
     ax.set_ylabel("Maximum Precipitation (mm)")
     ax.set_xlabel("Year")
@@ -284,50 +239,12 @@ def main():
     df = df.drop([('max_precip_ws_lores', 'MED')], axis=1)
     df['max_value'] = df["max_precip_ws_lores"].max(axis=1)
     df['ws'] = df["max_precip_ws_lores"].idxmax(axis=1)
-    slope, intercept, r_value, p_value, std_err = linregress(df['year'],df['max_value'])
-    trend_line = slope * np.array(years) + intercept
-    
-
-    # Calculate the residual standard error
-    x = np.array(df['year'])
-    y = np.array(df['max_value'])
-    n = len(x)
-    s_err = np.sqrt(np.sum((y - (slope * x + intercept))**2) / (n - 2))
-
-    # Calculate the t-value for a 95% confidence interval (two-tailed)
-    t_val = t.ppf(0.975, n - 2)
-    mean_x = np.mean(x)
-    # Sum of squares of the deviations of x
-    ssx = np.sum((x - mean_x)**2)
-
-    # Compute the standard error of the predicted values over the range of years
-    preds = np.array(years)
-    se_pred = s_err * np.sqrt(1/n + ((preds - mean_x)**2) / ssx)
-    # Margin of error at each x value
-    ci = t_val * se_pred
-
-    upper = trend_line + ci
-    lower = trend_line - ci
-
-    n = len(df['year'])
-    t_val_slope = t.ppf(0.975, n - 2)  # 95% confidence, two-tailed
-    slope_error = t_val_slope * std_err  # error for slope in mm/year
-
     fig = plt.figure(figsize=(15,5))
     ax = fig.add_subplot()
     for ws in watersheds_list:
         subset = df[df['ws'] == ws]
         ax.scatter(subset['year'], subset['max_value'], color=palette[ws], alpha=0.7,label=ws, s=100)
-    
-    ax.plot(annual_df.index, trend_line, color='black', linestyle='dotted', label='Linear Trend')
-    # Add the confidence band
-    ax.fill_between(years, lower, upper, color='grey', alpha=0.3, label='95% Confidence Interval')
-    
-    trend_text = f"Trend: {slope*10:.2f} ± {slope_error*10:.2f} mm/decade (95% CI)"
-    ax.text(0.95, 0.85, trend_text, transform=ax.transAxes, fontsize=10, color='black',
-        verticalalignment='top', horizontalalignment='right',
-        bbox=dict(facecolor='white', alpha=0.8, edgecolor='none'))
-
+    add_trend_with_ci(ax, df['year'], df['max_value'], scale_factor=10)
     ax.set_title("Maximum Precipitation per COL")
     ax.set_ylabel("Maximum Precipitation (mm)")
     ax.set_xlabel("Year")
@@ -366,43 +283,7 @@ def main():
         ax.legend(loc='upper left')
         ax.grid()
         
-        slope, intercept, r_value, p_value, std_err = linregress(dataplot.index,dataplot)
-        trend_line = slope * np.array(dataplot.index) + intercept
-
-        # Calculate the residual standard error
-        x = np.array(dataplot.index)
-        y = np.array(dataplot)
-        n = len(x)
-        s_err = np.sqrt(np.sum((y - (slope * x + intercept))**2) / (n - 2))
-
-        # Calculate the t-value for a 95% confidence interval (two-tailed)
-        t_val = t.ppf(0.975, n - 2)
-        mean_x = np.mean(x)
-        # Sum of squares of the deviations of x
-        ssx = np.sum((x - mean_x)**2)
-
-        # Compute the standard error of the predicted values over the range of years
-        preds = np.array(dataplot.index)
-        se_pred = s_err * np.sqrt(1/n + ((preds - mean_x)**2) / ssx)
-        # Margin of error at each x value
-        ci = t_val * se_pred
-
-        upper = trend_line + ci
-        lower = trend_line - ci
-
-        n = len(dataplot.index)
-        t_val_slope = t.ppf(0.975, n - 2)  # 95% confidence, two-tailed
-        slope_error = t_val_slope * std_err  # error for slope in mm/year
-
-    
-
-        ax.plot(dataplot.index, trend_line, color='black', linestyle='dotted', label='Linear Trend')
-        ax.fill_between(years, lower, upper, color='grey', alpha=0.3, label='95% Confidence Interval')
-        
-        trend_text = f"Trend: {slope*10:.2f} ± {slope_error*10:.2f} mm/decade (95% CI)"
-        ax.text(0.95, 0.85, trend_text, transform=ax.transAxes, fontsize=10, color='black',
-            verticalalignment='top', horizontalalignment='right',
-            bbox=dict(facecolor='white', alpha=0.8, edgecolor='none'))
+        add_trend_with_ci(ax, dataplot.index, dataplot.values, scale_factor=10)
 
     fig.savefig('Max_Acc_precip_from_one_COL.png')
 
@@ -432,43 +313,7 @@ def main():
         ax.legend(loc='upper left')
         ax.grid()
         
-        slope, intercept, r_value, p_value, std_err = linregress(dataplot.index,dataplot)
-        trend_line = slope * np.array(dataplot.index) + intercept
-
-        # Calculate the residual standard error
-        x = np.array(dataplot.index)
-        y = np.array(dataplot)
-        n = len(x)
-        s_err = np.sqrt(np.sum((y - (slope * x + intercept))**2) / (n - 2))
-
-        # Calculate the t-value for a 95% confidence interval (two-tailed)
-        t_val = t.ppf(0.975, n - 2)
-        mean_x = np.mean(x)
-        # Sum of squares of the deviations of x
-        ssx = np.sum((x - mean_x)**2)
-
-        # Compute the standard error of the predicted values over the range of years
-        preds = np.array(dataplot.index)
-        se_pred = s_err * np.sqrt(1/n + ((preds - mean_x)**2) / ssx)
-        # Margin of error at each x value
-        ci = t_val * se_pred
-
-        upper = trend_line + ci
-        lower = trend_line - ci
-
-        n = len(dataplot.index)
-        t_val_slope = t.ppf(0.975, n - 2)  # 95% confidence, two-tailed
-        slope_error = t_val_slope * std_err  # error for slope in mm/year
-
-
-        ax.plot(dataplot.index, trend_line, color='black', linestyle='dotted', label='Linear Trend')
-        # Add the confidence band
-        ax.fill_between(years, lower, upper, color='grey', alpha=0.3, label='95% Confidence Interval')
-        
-        trend_text = f"Trend: {slope*10:.2f} ± {slope_error*10:.2f} mm/decade (95% CI)"
-        ax.text(0.95, 0.85, trend_text, transform=ax.transAxes, fontsize=10, color='black',
-            verticalalignment='top', horizontalalignment='right',
-            bbox=dict(facecolor='white', alpha=0.8, edgecolor='none'))
+        add_trend_with_ci(ax, dataplot.index, dataplot.values, scale_factor=10)
     fig.savefig('Annual_precip_from_COLs.png')
     
 
@@ -490,48 +335,12 @@ def main():
     df['max_value'] = df["max_precip_ws_hires"].max(axis=1)
     df['ws'] = df["max_precip_ws_hires"].idxmax(axis=1,skipna=True)
     df = df.dropna()
-    slope, intercept, r_value, p_value, std_err = linregress(df['year'],df['max_value'])
-    trend_line = slope * np.array(df['year']) + intercept
-
-    # Calculate the residual standard error
-    x = np.array(df['year'])
-    y = np.array(df['max_value'])
-    n = len(x)
-    s_err = np.sqrt(np.sum((y - (slope * x + intercept))**2) / (n - 2))
-
-    # Calculate the t-value for a 95% confidence interval (two-tailed)
-    t_val = t.ppf(0.975, n - 2)
-    mean_x = np.mean(x)
-    # Sum of squares of the deviations of x
-    ssx = np.sum((x - mean_x)**2)
-
-    # Compute the standard error of the predicted values over the range of years
-    preds = np.array(df['year'])
-    se_pred = s_err * np.sqrt(1/n + ((preds - mean_x)**2) / ssx)
-    # Margin of error at each x value
-    ci = t_val * se_pred
-
-    upper = trend_line + ci
-    lower = trend_line - ci
-
-    n = len(df['year'])
-    t_val_slope = t.ppf(0.975, n - 2)  # 95% confidence, two-tailed
-    slope_error = t_val_slope * std_err  # error for slope in mm/year
- 
     fig = plt.figure(figsize=(15,5))
     ax = fig.add_subplot()
     for ws in watersheds_list:
         subset = df[df['ws'] == ws]
         ax.scatter(subset['year'], subset['max_value'], color=palette[ws], alpha=0.7,label=ws, s=100)
-    
-    ax.plot(df['year'], trend_line, color='black', linestyle='dotted', label='Linear Trend')
-    # Add the confidence band
-    ax.fill_between(df['year'], lower, upper, color='grey', alpha=0.3, label='95% Confidence Interval')
-    trend_text = f"Trend: {slope*10:.2f} ± {slope_error*10:.2f} mm/decade (95% CI)"
-    ax.text(0.95, 0.85, trend_text, transform=ax.transAxes, fontsize=10, color='black',
-        verticalalignment='top', horizontalalignment='right',
-        bbox=dict(facecolor='white', alpha=0.8, edgecolor='none'))
-
+    add_trend_with_ci(ax, df['year'], df['max_value'], scale_factor=10)
     ax.set_title("Maximum Precipitation per COL (Hi-res)")
     ax.set_ylabel("Maximum Precipitation (mm)")
     ax.set_xlabel("Year")
@@ -570,42 +379,7 @@ def main():
         ax.legend(loc='upper left')
         ax.grid()
         
-        slope, intercept, r_value, p_value, std_err = linregress(dataplot.index,dataplot)
-        trend_line = slope * np.array(dataplot.index) + intercept
-
-
-        # Calculate the residual standard error
-        x = np.array(dataplot.index)
-        y = np.array(dataplot)
-        n = len(x)
-        s_err = np.sqrt(np.sum((y - (slope * x + intercept))**2) / (n - 2))
-
-        # Calculate the t-value for a 95% confidence interval (two-tailed)
-        t_val = t.ppf(0.975, n - 2)
-        mean_x = np.mean(x)
-        # Sum of squares of the deviations of x
-        ssx = np.sum((x - mean_x)**2)
-
-        # Compute the standard error of the predicted values over the range of years
-        preds = np.array(dataplot.index)
-        se_pred = s_err * np.sqrt(1/n + ((preds - mean_x)**2) / ssx)
-        # Margin of error at each x value
-        ci = t_val * se_pred
-
-        upper = trend_line + ci
-        lower = trend_line - ci
-
-        n = len(dataplot.index)
-        t_val_slope = t.ppf(0.975, n - 2)  # 95% confidence, two-tailed
-        slope_error = t_val_slope * std_err  # error for slope in mm/year
-       
-        ax.plot(dataplot.index, trend_line, color='black', linestyle='dotted', label='Linear Trend')
-        ax.fill_between(dataplot.index, lower, upper, color='grey', alpha=0.3, label='95% Confidence Interval')
-        
-        trend_text = f"Trend: {slope*10:.2f} ± {slope_error*10:.2f} mm/decade (95% CI)"
-        ax.text(0.95, 0.85, trend_text, transform=ax.transAxes, fontsize=10, color='black',
-            verticalalignment='top', horizontalalignment='right',
-            bbox=dict(facecolor='white', alpha=0.8, edgecolor='none'))
+        add_trend_with_ci(ax, dataplot.index, dataplot.values, scale_factor=10)
 
     fig.savefig('Max_Acc_precip_from_one_COL_hires.png')
 
@@ -636,43 +410,7 @@ def main():
         ax.legend(loc='upper left')
         ax.grid()
         
-        slope, intercept, r_value, p_value, std_err = linregress(dataplot.index,dataplot)
-        trend_line = slope * np.array(dataplot.index) + intercept
-
-
-        # Calculate the residual standard error
-        x = np.array(dataplot.index)
-        y = np.array(dataplot)
-        n = len(x)
-        s_err = np.sqrt(np.sum((y - (slope * x + intercept))**2) / (n - 2))
-
-        # Calculate the t-value for a 95% confidence interval (two-tailed)
-        t_val = t.ppf(0.975, n - 2)
-        mean_x = np.mean(x)
-        # Sum of squares of the deviations of x
-        ssx = np.sum((x - mean_x)**2)
-
-        # Compute the standard error of the predicted values over the range of years
-        preds = np.array(dataplot.index)
-        se_pred = s_err * np.sqrt(1/n + ((preds - mean_x)**2) / ssx)
-        # Margin of error at each x value
-        ci = t_val * se_pred
-
-        upper = trend_line + ci
-        lower = trend_line - ci
-
-        n = len(dataplot.index)
-        t_val_slope = t.ppf(0.975, n - 2)  # 95% confidence, two-tailed
-        slope_error = t_val_slope * std_err  # error for slope in mm/year
-
-        ax.plot(dataplot.index, trend_line, color='black', linestyle='dotted', label='Linear Trend')
-        # Add the confidence band
-        ax.fill_between(dataplot.index, lower, upper, color='grey', alpha=0.3, label='95% Confidence Interval')
-        
-        trend_text = f"Trend: {slope*10:.2f} ± {slope_error*10:.2f} mm/decade (95% CI)"
-        ax.text(0.95, 0.85, trend_text, transform=ax.transAxes, fontsize=10, color='black',
-            verticalalignment='top', horizontalalignment='right',
-            bbox=dict(facecolor='white', alpha=0.8, edgecolor='none'))
+        add_trend_with_ci(ax, dataplot.index, dataplot.values, scale_factor=10)
 
     fig.savefig('Annual_precip_from_COLs_hires.png')
 

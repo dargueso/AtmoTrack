@@ -1,24 +1,38 @@
+import logging
+import os
+import glob
+
 import xarray as xr
-import time as time
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
-import os
-import glob
 
 import atmotrack_config as cfg
 
 from dask.distributed import Client
-from dask.diagnostics import ProgressBar
-from colorama import Fore, Style, init
-init(autoreset=True)
+
+def compute_ws_stats(da, ws_mask, watersheds, stat='max'):
+    """Compute per-watershed statistic from a DataArray."""
+    result = {}
+    for ws_name, ws_id in watersheds.items():
+        masked = da.where(ws_mask == ws_id, drop=True)
+        if stat == 'max':
+            result[ws_name] = masked.max().compute().item()
+        elif stat == 'sum':
+            result[ws_name] = masked.sum().compute().item()
+        elif stat == 'mean':
+            result[ws_name] = masked.mean().compute().item()
+        else:
+            result[ws_name] = np.nan
+    return result
+
 
 def deaccumulate_era5land(ds):
     """ Deaccumulate the ERA5land precipitation data
         Hourly values are accumulated since the beginning of the day
         So they are reset at 01:00 UTC, and they refer to the accumulated since 00:00 UTC
     """
-    print(f"{Style.BRIGHT} Deaccumulating ERA5land data")
+    logging.info("Deaccumulating ERA5land data")
     time_at_01 = ds.valid_time.dt.hour == 1
     diff = ds.tp.diff(dim='valid_time')
     diff = xr.concat([ds.tp.isel(valid_time=0), diff], dim='valid_time')
@@ -27,7 +41,9 @@ def deaccumulate_era5land(ds):
     return diff
 
 
-def main ():
+def main():
+
+    os.makedirs(cfg.stats_dir, exist_ok=True)
 
     # Start a local Dask cluster
     client = Client(n_workers=8, threads_per_worker=2, memory_limit='16GB')
@@ -36,19 +52,15 @@ def main ():
     col_min_dur = cfg.col_min_dur
     DT = cfg.DT
 
-    #Define patters of files
-
-    lores = './data_tracking/era5_daily_col_z500_????.nc'
-    hires = '/home/dargueso/ERA5/ERA5land/era5land_daily_PR_*.nc'
-
-    # Load atmo data
+    # File patterns from config
+    lores = f"{cfg.data_tracking}/era5_daily_col_z500_????.nc"
+    hires = cfg.hires_pr_pattern
 
     lores_files_all = sorted(glob.glob(lores))
     hires_files_all = sorted(glob.glob(hires))
 
-    # Load the watershed mask once (assumed to be at 0.25° resolution)
-
-    ws_mask_lores = xr.open_dataset('watershed_mask_medsea.nc')
+    # Watershed mask
+    ws_mask_lores = xr.open_dataset(cfg.watershed_mask)
 
     #Create hires mask via interpolation
 
@@ -65,7 +77,7 @@ def main ():
 
     for year in years:
 
-        print(f"{Fore.GREEN} Processing year {year}")
+        logging.info(f"Processing year {year}")
 
         all_results = []
 
@@ -99,7 +111,7 @@ def main ():
                     
 
         else:
-            print(f"{Fore.YELLOW} No hires data found for year {year}")
+            logging.warning(f"No hires data found for year {year}")
             ds_hires = None
 
         # Get objects from the lores file
@@ -124,8 +136,8 @@ def main ():
                 extended_time_indices = np.arange(time_true[0], time_true[-1] + 2)
             month = ds_lores.time.isel(time=extended_time_indices[0]).dt.month.item()
 
-            if extended_time_indices.size < col_min_dur/DT:
-                print(f"{Fore.YELLOW} Object {obj} does not meet the minimum duration of {col_min_dur} hours")
+            if extended_time_indices.size < col_min_dur / DT:
+                logging.debug(f"Object {obj} skipped: duration < {col_min_dur} h")
                 continue
 
             # Extract precipitation during event (including gaps when the object is not present)
@@ -149,41 +161,30 @@ def main ():
 
             # ---- Extract stats for each watershed --- #
 
-            ws_event_max_lores = {}
-            ws_event_sum_max_lores = {}
-            ws_event_sum_lores = {}
-            ws_event_mean_lores = {}
-            ws_event_max_hires = {}
-            ws_event_sum_max_hires = {}
-            ws_event_sum_hires = {}
-            ws_event_mean_hires = {}
+            ws_event_max_lores = compute_ws_stats(
+                pr_event_max_lores, ws_mask_lores['region_mask'], watersheds, stat='max')
+            ws_event_sum_max_lores = compute_ws_stats(
+                pr_event_sum_lores, ws_mask_lores['region_mask'], watersheds, stat='max')
+            ws_event_sum_lores = compute_ws_stats(
+                pr_event_sum_lores, ws_mask_lores['region_mask'], watersheds, stat='sum')
+            ws_event_mean_lores = compute_ws_stats(
+                pr_event_sum_lores, ws_mask_lores['region_mask'], watersheds, stat='mean')
 
-            for ws_name, ws_id in watersheds.items():
-
-                
-                pr_event_max_ws_lores = pr_event_max_lores.where(ws_mask_lores['region_mask'] == ws_id,drop=True)
-                pr_event_sum_ws_lores = pr_event_sum_lores.where(ws_mask_lores['region_mask'] == ws_id,drop=True)
-
-                ws_event_max_lores[ws_name] = pr_event_max_ws_lores.max().compute().item()
-                ws_event_sum_max_lores[ws_name] = pr_event_sum_ws_lores.max().compute().item()
-                ws_event_sum_lores[ws_name] = pr_event_sum_ws_lores.sum().compute().item()
-                ws_event_mean_lores[ws_name] = pr_event_sum_ws_lores.mean().compute().item()
-
-                if len(hires_files) > 0:
-
-                    pr_event_max_ws_hires = pr_event_max_hires.where(ws_mask_hires['region_mask'] == ws_id,drop=True)
-                    pr_event_sum_ws_hires = pr_event_sum_hires.where(ws_mask_hires['region_mask'] == ws_id,drop=True)
-
-                    ws_event_max_hires[ws_name] = pr_event_max_ws_hires.tp.max().compute().item()
-                    ws_event_sum_max_hires[ws_name] = pr_event_sum_ws_hires.tp.max().compute().item()
-                    ws_event_sum_hires[ws_name] = pr_event_sum_ws_hires.tp.sum().compute().item()
-                    ws_event_mean_hires[ws_name] = pr_event_sum_ws_hires.tp.mean().compute().item()
-           
-                else:
-                    ws_event_max_hires[ws_name] = np.nan
-                    ws_event_sum_max_hires[ws_name] = np.nan
-                    ws_event_sum_hires[ws_name] = np.nan
-                    ws_event_mean_hires[ws_name] = np.nan
+            if len(hires_files) > 0:
+                ws_event_max_hires = compute_ws_stats(
+                    pr_event_max_hires.tp, ws_mask_hires['region_mask'], watersheds, stat='max')
+                ws_event_sum_max_hires = compute_ws_stats(
+                    pr_event_sum_hires.tp, ws_mask_hires['region_mask'], watersheds, stat='max')
+                ws_event_sum_hires = compute_ws_stats(
+                    pr_event_sum_hires.tp, ws_mask_hires['region_mask'], watersheds, stat='sum')
+                ws_event_mean_hires = compute_ws_stats(
+                    pr_event_sum_hires.tp, ws_mask_hires['region_mask'], watersheds, stat='mean')
+            else:
+                nan_result = {ws_name: np.nan for ws_name in watersheds}
+                ws_event_max_hires = dict(nan_result)
+                ws_event_sum_max_hires = dict(nan_result)
+                ws_event_sum_hires = dict(nan_result)
+                ws_event_mean_hires = dict(nan_result)
             
             # Save the stats for the object
             new_obj_id = f"{obj}_{year}"
@@ -213,11 +214,15 @@ def main ():
             ds_hires_acc.close()
         
         df_events = pd.DataFrame(all_results)
-        df_events.to_csv(f'./events_stats/events_stats_{year}.csv', index=False)
-        print(f"{Style.BRIGHT} {len(all_results)} events processed")
-        print(f"{Style.BRIGHT} Saved events stats to events_stats_{year}.csv")
-        print(f"{Fore.GREEN} Done year {year}!")
+        out_csv = f"{cfg.stats_dir}/events_stats_{year}.csv"
+        df_events.to_csv(out_csv, index=False)
+        logging.info(f"{len(all_results)} events processed; saved to {out_csv}")
 
 
 if __name__ == '__main__':
+    logging.basicConfig(
+        format="%(asctime)s | %(levelname)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        level=logging.INFO,
+    )
     main()
