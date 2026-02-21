@@ -1,36 +1,36 @@
 #!/usr/bin/env python
 """
-JetStream_tracking_ERA5.py — Jet stream tracking from ERA5 200 hPa winds.
+JetStream_tracking_ERA5.py — Jet stream tracking from 200 hPa winds.
 
-For each annual ERA5 200 hPa file in ``data_era5/``:
+For each year in the configured input dataset:
   1. Loads u and v wind components at 200 hPa.
   2. Computes wind speed magnitude (uv200 = sqrt(u² + v²)).
   3. Runs jetstream_tracking to label jet stream objects.
   4. Writes a per-year NetCDF to ``data_tracking/``.
 
-All parameters (thresholds, paths) are read from ``config.toml``.
+All parameters (thresholds, paths, variable names) are read from ``config.toml``.
+Set ``[data_source]`` keys to switch between ERA5, WRF, etc.
 """
 
 import argparse
 import logging
 import os
+import pathlib
 import time
-from glob import glob
 
 import numpy as np
-import pandas as pd
-import xarray as xr
 from joblib import Parallel, delayed
 
 import atmotrack_config as cfg
+from atmotrack_io import available_years, load_grid, load_times, open_pattern, slice_year
 from tracking_functions import jetstream_tracking
 from utils import get_logger
 
 
 ###########################################################
 def main():
-    """Loop over available annual 200 hPa files and track jet streams in parallel."""
-    parser = argparse.ArgumentParser(description="Jet stream tracking from ERA5 200 hPa winds.")
+    """Loop over available years and track jet streams in parallel."""
+    parser = argparse.ArgumentParser(description="Jet stream tracking from 200 hPa winds.")
     parser.add_argument(
         "--year-start",
         type=int,
@@ -60,12 +60,12 @@ def main():
         "atmotrack", log_file="out.log", level=logging.DEBUG if args.verbose else logging.INFO
     )
     os.makedirs(cfg.data_tracking, exist_ok=True)
-    filesin = sorted(
-        f
-        for f in glob(f"{cfg.data_era5}/era5_daily_200hPa_????.nc")
-        if args.year_start <= int(f[-7:-3]) <= args.year_end
-    )
-    n_jobs = min(len(filesin), args.jobs)
+
+    ds_z200 = open_pattern("pattern_z200")
+    years = [y for y in available_years(ds_z200) if args.year_start <= y <= args.year_end]
+    ds_z200.close()
+
+    n_jobs = min(len(years), args.jobs)
     for _var in (
         "OMP_NUM_THREADS",
         "MKL_NUM_THREADS",
@@ -73,40 +73,33 @@ def main():
         "NUMEXPR_NUM_THREADS",
     ):
         os.environ[_var] = "1"
-    Parallel(n_jobs=n_jobs)(delayed(jet_tracking_worker)(fin, args.verbose) for fin in filesin)
+    Parallel(n_jobs=n_jobs)(delayed(jet_tracking_worker)(year, args.verbose) for year in years)
 
 
 ###########################################################
-def jet_tracking_worker(fin_200hpa, verbose=False):
-    """Track jet stream for a single annual file."""
+def jet_tracking_worker(year: int, verbose: bool = False) -> None:
+    """Track jet stream for a single year."""
     logger = get_logger("atmotrack", level=logging.DEBUG if verbose else logging.INFO)
-    logger.info(f"Analyzing {fin_200hpa}")
+    logger.info(f"Analyzing year {year}")
     start_time = time.time()
 
-    ds = xr.open_dataset(fin_200hpa).squeeze()
+    ds = slice_year(open_pattern("pattern_z200"), year)
 
-    u200 = ds.u.values
-    v200 = ds.v.values
+    u200 = ds[cfg.var_u200].values
+    v200 = ds[cfg.var_v200].values
     uv200 = np.sqrt(u200**2 + v200**2)
 
-    lat = ds.latitude.values
-    lon = ds.longitude.values
-    lon2d, lat2d = np.meshgrid(lon, lat)
-
-    times = pd.date_range(
-        ds.valid_time.isel(valid_time=0).values,
-        end=ds.valid_time.isel(valid_time=-1).values,
-        freq="6h",
-    )
+    lon2d, lat2d = load_grid(ds)
+    times = load_times(ds)
 
     logger.debug(f"Loading data: {time.time() - start_time:.2f} s")
     start_time = time.time()
 
-    fileout = fin_200hpa.replace("200hPa", "jet").replace(cfg.data_era5, cfg.data_tracking)
+    fileout = pathlib.Path(cfg.data_tracking) / f"jet_{year:04d}.nc"
 
-    jetstream_tracking(uv200, times, lon2d, lat2d, nc_file=fileout)
+    jetstream_tracking(uv200, times, lon2d, lat2d, nc_file=str(fileout))
 
-    logger.info(f"DONE {fin_200hpa} in {time.time() - start_time:.2f} s")
+    logger.info(f"DONE year {year} in {time.time() - start_time:.2f} s")
 
 
 ###############################################################################
