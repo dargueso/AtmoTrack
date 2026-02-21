@@ -100,3 +100,35 @@ col_max_lon          = 19        # all object grid points must be west of this [
 # ---------------------------------------------------------------------------
 front_treshold = 0.5    # frontal diagnostic threshold
 MinAreaFR      = 50000  # minimum front area [km²]
+
+# ---------------------------------------------------------------------------
+[jetstream]
+# Jet stream tracking options
+# ---------------------------------------------------------------------------
+js_min_anomaly   = 24.0      # minimum 200 hPa wind speed anomaly [m/s]
+MinTimeJS        = 24        # minimum lifetime of jet objects [hours]
+js_breakup_method = "breakup" # "breakup" or "watershed"
+
+# ---------------------------------------------------------------------------
+[atmospheric_rivers]
+# Atmospheric River tracking options
+# ---------------------------------------------------------------------------
+# 850 hPa moisture flux approach
+MinMSthreshold = 0.13   # minimum moisture flux threshold [g/g · m/s]
+MinTimeMS      = 9      # minimum lifetime of moisture stream [hours]
+MinAreaMS      = 100000 # minimum area of moisture stream [km²]
+
+# IVT approach
+IVTthreshold   = 500.0  # IVT threshold [kg m⁻¹ s⁻¹]
+MinTimeIVT     = 9      # minimum lifetime of IVT-AR [hours]
+
+# ---------------------------------------------------------------------------
+[tropical_cyclones]
+# Tropical Cyclone tracking options
+# ---------------------------------------------------------------------------
+TC_lat_genesis  = 30.0   # max abs latitude of genesis point [°]
+TC_deltaT_core  = 2.0    # warm-core ΔT (center vs object mean) threshold [K]
+TC_T850min      = 273.15 # minimum 850 hPa core temperature [K]
+TC_Pmin         = 980.0  # minimum SLP threshold [hPa]
+TC_lat_max      = 60.0   # maximum abs latitude cutoff [°]
+TC_min_duration = 16     # minimum object timestep count (2 × 8 steps @ 6-hourly)

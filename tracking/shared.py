@@ -253,6 +253,37 @@ def ConnectLon(object_indices):
     return object_indices
 
 
+def ConnectLon_on_timestep(object_indices):
+    """Connect objects split across the date line, one timestep at a time.
+
+    Unlike ``ConnectLon`` (which relabels globally), this function only merges
+    the left/right edge objects within each individual timestep.  This is
+    required after ``BreakupObjects`` which can assign different labels to the
+    same physical object at different times.
+    """
+    for tt in range(object_indices.shape[0]):
+        EDGE = np.append(
+            object_indices[tt, :, -1][:, None], object_indices[tt, :, 0][:, None], axis=1
+        )
+        iEDGE = np.sum(EDGE > 0, axis=1) == 2
+        OBJ_Left = EDGE[iEDGE, 0]
+        OBJ_Right = EDGE[iEDGE, 1]
+        OBJ_joint = np.array(
+            [
+                OBJ_Left[ii].astype(str) + "_" + OBJ_Right[ii].astype(str)
+                for ii, _ in enumerate(OBJ_Left)
+            ]
+        )
+        NotSame = OBJ_Left != OBJ_Right
+        OBJ_joint = OBJ_joint[NotSame]
+        OBJ_unique = np.unique(OBJ_joint)
+        for obj, _ in enumerate(OBJ_unique):
+            ObE = int(OBJ_unique[obj].split("_")[1])
+            ObW = int(OBJ_unique[obj].split("_")[0])
+            object_indices[tt, object_indices[tt, :] == ObE] = ObW
+    return object_indices
+
+
 ### Break up long living cyclones by extracting the biggest cyclone at each time
 def BreakupObjects(
     DATA,  # 3D matrix [time,lat,lon] containing the objects

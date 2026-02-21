@@ -212,6 +212,86 @@ def test_mcs_tracking():
     print(f"PASS  mcs_tracking  (mcs labels: {mcs_objs.max()})")
 
 
+def test_tc_tracking():
+    """TC_tracking returns an object array and track dict of correct shape/type.
+
+    Runs CY_ACY_slp_tracking on synthetic SLP to get cy_slp_objects, then
+    feeds those into TC_tracking with synthetic T850.  The synthetic low is
+    centred at ~42°N, so it fails the genesis-latitude filter (TC_lat_genesis
+    = 30°) — no TC labels are expected, but shape and types must be correct.
+    """
+    from tracking_functions import CY_ACY_slp_tracking, TC_tracking
+
+    slp = _slp()
+    t850 = _temp(280.0)  # warm enough to pass TC_T850min (273.15 K)
+    cy_objs, _ = CY_ACY_slp_tracking(slp, _TIMES, _LON2D, _LAT2D, nc_file=None)
+
+    TC_obj, TC_Tracks = TC_tracking(cy_objs, t850, slp, _LON2D, _LAT2D, nc_file=None)
+
+    assert TC_obj.shape == (_NT, _NLAT, _NLON), f"TC_obj shape: {TC_obj.shape}"
+    assert TC_obj.min() >= 0, "TC_obj contains negative IDs"
+    assert isinstance(TC_Tracks, dict), f"TC_Tracks should be dict, got {type(TC_Tracks)}"
+    print(f"PASS  tc_tracking  (tc labels: {TC_obj.max()}, tracks: {len(TC_Tracks)})")
+
+
+def test_jetstream_tracking():
+    """jetstream_tracking returns an array of the correct shape.
+
+    Uses a synthetic 200 hPa wind field with a strong zonal jet (~50 m/s)
+    centred at 45°N so anomaly detection can find objects.
+    """
+    from tracking_functions import jetstream_tracking
+
+    # Strong zonal jet centred at 45°N — anomaly well above js_min_anomaly (24 m/s)
+    uv200 = np.empty((_NT, _NLAT, _NLON), dtype=np.float64)
+    for t in range(_NT):
+        jet_core = 50.0 * np.exp(-((_LAT2D - 45.0) ** 2) / 10.0)
+        uv200[t] = jet_core + _RNG.normal(0, 1, size=(_NLAT, _NLON))
+
+    jet = jetstream_tracking(uv200, _TIMES, _LON2D, _LAT2D, nc_file=None)
+
+    assert jet.shape == (_NT, _NLAT, _NLON), f"jet shape: {jet.shape}"
+    assert jet.min() >= 0, "jet_objects contains negative IDs"
+    print(f"PASS  jetstream_tracking  (jet labels: {jet.max()})")
+
+
+def test_ar_850hpa_tracking():
+    """AR_850hPa_tracking returns an array of the correct shape.
+
+    Uses a synthetic moisture flux field. With the default MinMSthreshold of
+    0.13 g/g·m/s the small synthetic values won't produce objects — that's
+    fine; we only check shape and type.
+    """
+    from tracking_functions import AR_850hPa_tracking
+
+    # Moisture flux magnitude well below the 0.13 threshold → 0 objects expected
+    VapTrans = np.abs(_RNG.normal(0, 0.01, size=(_NT, _NLAT, _NLON)))
+
+    ar850 = AR_850hPa_tracking(VapTrans, _TIMES, _LON2D, _LAT2D, nc_file=None)
+
+    assert ar850.shape == (_NT, _NLAT, _NLON), f"ar850 shape: {ar850.shape}"
+    assert ar850.min() >= 0, "ar850_objects contains negative IDs"
+    print(f"PASS  ar_850hpa_tracking  (ar850 labels: {ar850.max()})")
+
+
+def test_ar_ivt_tracking():
+    """AR_IVT_tracking returns an array of the correct shape.
+
+    Uses a synthetic IVT field. With the default IVTthreshold of 500 kg/m/s
+    the synthetic values won't produce objects — that's fine.
+    """
+    from tracking_functions import AR_IVT_tracking
+
+    # IVT well below the 500 threshold → 0 objects expected
+    IVT = np.abs(_RNG.normal(0, 50, size=(_NT, _NLAT, _NLON)))
+
+    ar_ivt = AR_IVT_tracking(IVT, _TIMES, _LON2D, _LAT2D, nc_file=None)
+
+    assert ar_ivt.shape == (_NT, _NLAT, _NLON), f"ar_ivt shape: {ar_ivt.shape}"
+    assert ar_ivt.min() >= 0, "ar_ivt_objects contains negative IDs"
+    print(f"PASS  ar_ivt_tracking  (ar_ivt labels: {ar_ivt.max()})")
+
+
 # ---------------------------------------------------------------------------
 # Standalone runner (no pytest required)
 # ---------------------------------------------------------------------------
@@ -232,6 +312,10 @@ if __name__ == "__main__":
         test_col_tracking,
         test_front_tracking,
         test_mcs_tracking,
+        test_tc_tracking,
+        test_jetstream_tracking,
+        test_ar_850hpa_tracking,
+        test_ar_ivt_tracking,
     ]
     failed = 0
     for fn in tests:
