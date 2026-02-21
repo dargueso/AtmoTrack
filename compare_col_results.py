@@ -24,6 +24,7 @@ import xarray as xr
 # helpers
 # ---------------------------------------------------------------------------
 
+
 def _load(path: str) -> xr.Dataset:
     try:
         return xr.open_dataset(path)
@@ -44,9 +45,9 @@ def _col_characteristics(col_objects: np.ndarray, lat: np.ndarray, lon: np.ndarr
     chars = {}
     lon2d, lat2d = np.meshgrid(lon, lat)
     for cid in ids:
-        mask = col_objects == cid          # (time, lat, lon) bool
+        mask = col_objects == cid  # (time, lat, lon) bool
         timesteps = np.where(mask.any(axis=(1, 2)))[0]
-        area_ts = mask.sum(axis=(1, 2))    # gridpoints per timestep
+        area_ts = mask.sum(axis=(1, 2))  # gridpoints per timestep
         # centroid weighted by area
         flat = mask.reshape(mask.shape[0], -1)  # (time, nlat*nlon)
         lat_flat = lat2d.ravel()
@@ -56,12 +57,12 @@ def _col_characteristics(col_objects: np.ndarray, lat: np.ndarray, lon: np.ndarr
         clon = (flat * lon_flat).sum() / total if total > 0 else np.nan
         chars[int(cid)] = {
             "n_timesteps": len(timesteps),
-            "t_start":     int(timesteps[0]),
-            "t_end":       int(timesteps[-1]),
-            "area_mean":   float(area_ts[area_ts > 0].mean()),
-            "area_max":    float(area_ts.max()),
-            "clat":        float(clat),
-            "clon":        float(clon),
+            "t_start": int(timesteps[0]),
+            "t_end": int(timesteps[-1]),
+            "area_mean": float(area_ts[area_ts > 0].mean()),
+            "area_max": float(area_ts.max()),
+            "clat": float(clat),
+            "clon": float(clon),
         }
     return chars
 
@@ -72,16 +73,18 @@ def _chars_as_matrix(chars: dict) -> np.ndarray:
         return np.empty((0, 6))
     rows = []
     for v in chars.values():
-        rows.append([
-            v["n_timesteps"],
-            v["t_start"],
-            v["t_end"],
-            v["area_mean"],
-            v["area_max"],
-            v["clat"],
-            # deliberately exclude clon — can be shifted by relabelling
-        ])
-    return np.array(sorted(rows))          # sort so order-independent
+        rows.append(
+            [
+                v["n_timesteps"],
+                v["t_start"],
+                v["t_end"],
+                v["area_mean"],
+                v["area_max"],
+                v["clat"],
+                # deliberately exclude clon — can be shifted by relabelling
+            ]
+        )
+    return np.array(sorted(rows))  # sort so order-independent
 
 
 def _compare_arrays(name: str, a: np.ndarray, b: np.ndarray) -> bool:
@@ -101,7 +104,7 @@ def _compare_arrays(name: str, a: np.ndarray, b: np.ndarray) -> bool:
 
 def _compare_characteristics(chars_cur: dict, chars_orig: dict) -> None:
     """Print per-COL characteristic comparison."""
-    n_cur  = len(chars_cur)
+    n_cur = len(chars_cur)
     n_orig = len(chars_orig)
     print(f"\n  COL count — current: {n_cur}   original: {n_orig}", end="")
     print("  ✓" if n_cur == n_orig else "  ✗ DIFFERENT")
@@ -113,7 +116,7 @@ def _compare_characteristics(chars_cur: dict, chars_orig: dict) -> None:
     def _durations(chars):
         return sorted(v["n_timesteps"] for v in chars.values())
 
-    dur_cur  = _durations(chars_cur)
+    dur_cur = _durations(chars_cur)
     dur_orig = _durations(chars_orig)
     if dur_cur == dur_orig:
         print("  Duration distribution: IDENTICAL ✓")
@@ -126,7 +129,7 @@ def _compare_characteristics(chars_cur: dict, chars_orig: dict) -> None:
     def _areas(chars):
         return sorted(round(v["area_max"]) for v in chars.values())
 
-    area_cur  = _areas(chars_cur)
+    area_cur = _areas(chars_cur)
     area_orig = _areas(chars_orig)
     if area_cur == area_orig:
         print("  Max-area distribution: IDENTICAL ✓")
@@ -139,7 +142,7 @@ def _compare_characteristics(chars_cur: dict, chars_orig: dict) -> None:
     def _clats(chars):
         return sorted(round(v["clat"], 1) for v in chars.values())
 
-    clat_cur  = _clats(chars_cur)
+    clat_cur = _clats(chars_cur)
     clat_orig = _clats(chars_orig)
     if clat_cur == clat_orig:
         print("  Centroid-lat distribution: IDENTICAL ✓")
@@ -152,7 +155,7 @@ def _compare_characteristics(chars_cur: dict, chars_orig: dict) -> None:
     def _starts(chars):
         return sorted(v["t_start"] for v in chars.values())
 
-    st_cur  = _starts(chars_cur)
+    st_cur = _starts(chars_cur)
     st_orig = _starts(chars_orig)
     if st_cur == st_orig:
         print("  Start-timestep distribution: IDENTICAL ✓")
@@ -166,14 +169,18 @@ def _compare_characteristics(chars_cur: dict, chars_orig: dict) -> None:
 # main
 # ---------------------------------------------------------------------------
 
+
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Compare two COL tracking output NetCDF files."
+    parser = argparse.ArgumentParser(description="Compare two COL tracking output NetCDF files.")
+    parser.add_argument(
+        "--current",
+        required=True,
+        metavar="NC",
+        help="Current code output (e.g. data_tracking/era5_daily_col_z500_2000.nc)",
     )
-    parser.add_argument("--current",  required=True, metavar="NC",
-                        help="Current code output (e.g. data_tracking/era5_daily_col_z500_2000.nc)")
-    parser.add_argument("--original", required=True, metavar="NC",
-                        help="Original code output for the same year")
+    parser.add_argument(
+        "--original", required=True, metavar="NC", help="Original code output for the same year"
+    )
     args = parser.parse_args()
 
     print("=" * 60)
@@ -181,23 +188,23 @@ def main() -> None:
     print(f"  ORIGINAL: {args.original}")
     print("=" * 60)
 
-    ds_cur  = _load(args.current)
+    ds_cur = _load(args.current)
     ds_orig = _load(args.original)
 
     lat = ds_cur["latitude"].values
     lon = ds_cur["longitude"].values
 
-    col_cur  = ds_cur["col_objects"].values.astype(int)
+    col_cur = ds_cur["col_objects"].values.astype(int)
     col_orig = ds_orig["col_objects"].values.astype(int)
-    cy_cur   = ds_cur["cy_z500_objects"].values.astype(int)
-    cy_orig  = ds_orig["cy_z500_objects"].values.astype(int)
+    cy_cur = ds_cur["cy_z500_objects"].values.astype(int)
+    cy_orig = ds_orig["cy_z500_objects"].values.astype(int)
 
     print("\n--- Array equality ---")
-    col_identical = _compare_arrays("col_objects    ", col_cur,  col_orig)
-    cy_identical  = _compare_arrays("cy_z500_objects", cy_cur,   cy_orig)
+    col_identical = _compare_arrays("col_objects    ", col_cur, col_orig)
+    cy_identical = _compare_arrays("cy_z500_objects", cy_cur, cy_orig)
 
     print("\n--- COL characteristics ---")
-    chars_cur  = _col_characteristics(col_cur,  lat, lon)
+    chars_cur = _col_characteristics(col_cur, lat, lon)
     chars_orig = _col_characteristics(col_orig, lat, lon)
     _compare_characteristics(chars_cur, chars_orig)
 

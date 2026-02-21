@@ -40,13 +40,17 @@ class Style:
 # ---------------------------------------------------------------------------
 _RESET = "\033[0m" if _use_color else ""
 
-_LEVEL_COLORS = {
-    "DEBUG":    "\033[36m",   # cyan
-    "INFO":     "\033[32m",   # green
-    "WARNING":  "\033[33m",   # yellow
-    "ERROR":    "\033[31m",   # red
-    "CRITICAL": "\033[35m",   # magenta
-} if _use_color else {}
+_LEVEL_COLORS = (
+    {
+        "DEBUG": "\033[36m",  # cyan
+        "INFO": "\033[32m",  # green
+        "WARNING": "\033[33m",  # yellow
+        "ERROR": "\033[31m",  # red
+        "CRITICAL": "\033[35m",  # magenta
+    }
+    if _use_color
+    else {}
+)
 
 _DATEFMT = "%Y-%m-%d %H:%M:%S"
 
