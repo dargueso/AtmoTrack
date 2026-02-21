@@ -25,6 +25,9 @@ Usage examples:
   # Download only Z500 and SLP for two specific years
   python download_ERA5.py --years 2020 2023 --datasets z500 slp
 
+  # Download the current (possibly incomplete) year up to last available month
+  python download_ERA5.py --current-year
+
   # Keep the intermediate per-month files in addition to the annual files
   python download_ERA5.py --year-start 2000 --year-end 2024 --keep-monthly
 
@@ -35,6 +38,7 @@ Usage examples:
 import argparse
 import logging
 import pathlib
+from datetime import date
 
 import cdsapi
 import xarray as xr
@@ -176,6 +180,11 @@ def parse_args():
         metavar="YEAR",
         help="Explicit list of years to download",
     )
+    year_group.add_argument(
+        "--current-year",
+        action="store_true",
+        help="Download the current (possibly incomplete) year up to the latest available month",
+    )
     parser.add_argument(
         "--year-end",
         type=int,
@@ -221,7 +230,10 @@ def main():
     )
 
     # Resolve year list
-    if args.years:
+    today = date.today()
+    if args.current_year:
+        years = [today.year]
+    elif args.years:
         years = sorted(args.years)
     else:
         if args.year_end is None:
@@ -238,6 +250,10 @@ def main():
     for year in years:
         logging.info(f"=== Year {year} ===")
 
+        # For the current year only download months that have already started;
+        # CDS returns whatever days are available within the requested month.
+        last_month = today.month if year == today.year else 12
+
         for ds_key in args.datasets:
             ds = DATASETS[ds_key]
             logging.info(f"  [{ds_key}] {ds['description']}")
@@ -250,7 +266,7 @@ def main():
             # Download each month
             monthly_files = [
                 download_month(client, ds_key, year, month, monthly_dir, args.area)
-                for month in range(1, 13)
+                for month in range(1, last_month + 1)
             ]
 
             # Concatenate into annual file
