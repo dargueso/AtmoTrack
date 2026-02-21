@@ -39,6 +39,16 @@ for _section_values in _cfg.values():
     for _key, _val in _section_values.items():
         globals()[_key] = _val
 
+# Keep data_era5 and data_input in sync so that code using either name works.
+# Users who set only data_era5 (ERA5 default) get data_input for free, and
+# users who set only data_input (non-ERA5 sources) still satisfy download_ERA5.py.
+_g = globals()
+if "data_input" not in _g and "data_era5" in _g:
+    _g["data_input"] = _g["data_era5"]
+elif "data_era5" not in _g and "data_input" in _g:
+    _g["data_era5"] = _g["data_input"]
+del _g
+
 del _f, _cfg, _config_path, _section_values, _key, _val
 
 __version__ = "1.0.0"

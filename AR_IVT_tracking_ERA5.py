@@ -1,38 +1,36 @@
 #!/usr/bin/env python
 """
-AR_IVT_tracking_ERA5.py — Atmospheric River tracking from ERA5 Integrated Vapour Transport.
+AR_IVT_tracking_ERA5.py — Atmospheric River tracking from Integrated Vapour Transport.
 
-For each annual ERA5 IVT file in ``data_era5/``:
+For each year in the configured input dataset:
   1. Loads eastward (ivte) and northward (ivtn) IVT components [kg m⁻¹ s⁻¹].
   2. Computes IVT magnitude: sqrt(ivte² + ivtn²).
   3. Runs AR_IVT_tracking to label AR objects.
   4. Writes a per-year NetCDF to ``data_tracking/``.
 
-All parameters (thresholds, paths) are read from ``config.toml``.
-
-Expected input file: era5_daily_IVT_{year}.nc with variables ``ivte`` and ``ivtn``.
+All parameters (thresholds, paths, variable names) are read from ``config.toml``.
+Set ``[data_source]`` keys to switch between ERA5, WRF, etc.
 """
 
 import argparse
 import logging
 import os
+import pathlib
 import time
-from glob import glob
 
 import numpy as np
-import pandas as pd
-import xarray as xr
 from joblib import Parallel, delayed
 
 import atmotrack_config as cfg
+from atmotrack_io import available_years, load_grid, load_times, open_pattern, slice_year
 from tracking_functions import AR_IVT_tracking
 from utils import get_logger
 
 
 ###########################################################
 def main():
-    """Loop over available annual IVT files and track ARs in parallel."""
-    parser = argparse.ArgumentParser(description="AR tracking from ERA5 IVT.")
+    """Loop over available years and track ARs in parallel."""
+    parser = argparse.ArgumentParser(description="AR tracking from IVT.")
     parser.add_argument(
         "--year-start",
         type=int,
@@ -62,12 +60,12 @@ def main():
         "atmotrack", log_file="out.log", level=logging.DEBUG if args.verbose else logging.INFO
     )
     os.makedirs(cfg.data_tracking, exist_ok=True)
-    filesin = sorted(
-        f
-        for f in glob(f"{cfg.data_era5}/era5_daily_IVT_????.nc")
-        if args.year_start <= int(f[-7:-3]) <= args.year_end
-    )
-    n_jobs = min(len(filesin), args.jobs)
+
+    ds_ivt = open_pattern("pattern_ivt")
+    years = [y for y in available_years(ds_ivt) if args.year_start <= y <= args.year_end]
+    ds_ivt.close()
+
+    n_jobs = min(len(years), args.jobs)
     for _var in (
         "OMP_NUM_THREADS",
         "MKL_NUM_THREADS",
@@ -75,40 +73,33 @@ def main():
         "NUMEXPR_NUM_THREADS",
     ):
         os.environ[_var] = "1"
-    Parallel(n_jobs=n_jobs)(delayed(ar_ivt_tracking_worker)(fin, args.verbose) for fin in filesin)
+    Parallel(n_jobs=n_jobs)(delayed(ar_ivt_tracking_worker)(year, args.verbose) for year in years)
 
 
 ###########################################################
-def ar_ivt_tracking_worker(fin_ivt, verbose=False):
-    """Track IVT ARs for a single annual file."""
+def ar_ivt_tracking_worker(year: int, verbose: bool = False) -> None:
+    """Track IVT ARs for a single year."""
     logger = get_logger("atmotrack", level=logging.DEBUG if verbose else logging.INFO)
-    logger.info(f"Analyzing {fin_ivt}")
+    logger.info(f"Analyzing year {year}")
     start_time = time.time()
 
-    ds = xr.open_dataset(fin_ivt).squeeze()
+    ds = slice_year(open_pattern("pattern_ivt"), year)
 
-    ivte = ds.ivte.values  # eastward IVT [kg m⁻¹ s⁻¹]
-    ivtn = ds.ivtn.values  # northward IVT [kg m⁻¹ s⁻¹]
+    ivte = ds[cfg.var_ivte].values  # eastward IVT [kg m⁻¹ s⁻¹]
+    ivtn = ds[cfg.var_ivtn].values  # northward IVT [kg m⁻¹ s⁻¹]
     IVT = np.sqrt(ivte**2 + ivtn**2)
 
-    lat = ds.latitude.values
-    lon = ds.longitude.values
-    lon2d, lat2d = np.meshgrid(lon, lat)
-
-    times = pd.date_range(
-        ds.valid_time.isel(valid_time=0).values,
-        end=ds.valid_time.isel(valid_time=-1).values,
-        freq="6h",
-    )
+    lon2d, lat2d = load_grid(ds)
+    times = load_times(ds)
 
     logger.debug(f"Loading data: {time.time() - start_time:.2f} s")
     start_time = time.time()
 
-    fileout = fin_ivt.replace("IVT", "ar_ivt").replace(cfg.data_era5, cfg.data_tracking)
+    fileout = pathlib.Path(cfg.data_tracking) / f"ar_ivt_{year:04d}.nc"
 
-    AR_IVT_tracking(IVT, times, lon2d, lat2d, nc_file=fileout)
+    AR_IVT_tracking(IVT, times, lon2d, lat2d, nc_file=str(fileout))
 
-    logger.info(f"DONE {fin_ivt} in {time.time() - start_time:.2f} s")
+    logger.info(f"DONE year {year} in {time.time() - start_time:.2f} s")
 
 
 ###############################################################################

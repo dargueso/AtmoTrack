@@ -1,36 +1,42 @@
 #!/usr/bin/env python
 """
-TC_tracking_ERA5.py — Tropical Cyclone tracking from ERA5 data.
+TC_tracking_ERA5.py — Tropical Cyclone tracking.
 
-For each annual SLP cyclone file in ``data_tracking/``:
-  1. Loads pre-computed SLP cyclone objects (cy_slp_objects).
-  2. Loads 850 hPa temperature and SLP from ERA5 input files.
+Reads pre-computed SLP cyclone objects produced by SLP_tracking_ERA5.py, then
+loads 850 hPa temperature and SLP from the configured input dataset to apply
+tropical cyclone criteria.
+
+For each year with an existing ``cy_slp_{year}.nc`` file:
+  1. Loads pre-computed SLP cyclone objects.
+  2. Loads 850 hPa temperature and SLP from the configured input source.
   3. Runs TC_tracking to filter confirmed tropical cyclones.
   4. Writes a per-year NetCDF to ``data_tracking/``.
 
-All parameters (thresholds, paths) are read from ``config.toml``.
+All parameters (thresholds, paths, variable names) are read from ``config.toml``.
+Set ``[data_source]`` keys to switch between ERA5, WRF, etc.
+
+Note: run SLP_tracking_ERA5.py first to generate the required cy_slp files.
 """
 
 import argparse
 import logging
 import os
+import pathlib
 import time
-from glob import glob
 
-import numpy as np
-import pandas as pd
 import xarray as xr
 from joblib import Parallel, delayed
 
 import atmotrack_config as cfg
+from atmotrack_io import load_grid, load_times, open_pattern, slice_year
 from tracking_functions import TC_tracking
 from utils import get_logger
 
 
 ###########################################################
 def main():
-    """Loop over available annual CY-SLP files and track TCs in parallel."""
-    parser = argparse.ArgumentParser(description="Tropical Cyclone tracking from ERA5 data.")
+    """Loop over available CY-SLP files and track TCs in parallel."""
+    parser = argparse.ArgumentParser(description="Tropical Cyclone tracking.")
     parser.add_argument(
         "--year-start",
         type=int,
@@ -60,12 +66,17 @@ def main():
         "atmotrack", log_file="out.log", level=logging.DEBUG if args.verbose else logging.INFO
     )
     os.makedirs(cfg.data_tracking, exist_ok=True)
-    filesin = sorted(
-        f
-        for f in glob(f"{cfg.data_tracking}/era5_daily_cy_slp_????.nc")
-        if args.year_start <= int(f[-7:-3]) <= args.year_end
-    )
-    n_jobs = min(len(filesin), args.jobs)
+
+    # Discover years from existing cy_slp output files (produced by SLP_tracking_ERA5.py)
+    cy_slp_dir = pathlib.Path(cfg.data_tracking)
+    cy_slp_files = sorted(cy_slp_dir.glob("cy_slp_????.nc"))
+    years = [
+        int(f.stem[-4:])
+        for f in cy_slp_files
+        if args.year_start <= int(f.stem[-4:]) <= args.year_end
+    ]
+
+    n_jobs = min(len(years), args.jobs)
     # Limit BLAS threads to 1 per worker to avoid thread contention on
     # many-core machines where numpy/scipy would otherwise claim all CPUs.
     for _var in (
@@ -75,52 +86,46 @@ def main():
         "NUMEXPR_NUM_THREADS",
     ):
         os.environ[_var] = "1"
-    Parallel(n_jobs=n_jobs)(delayed(tc_tracking_worker)(fin, args.verbose) for fin in filesin)
+    Parallel(n_jobs=n_jobs)(delayed(tc_tracking_worker)(year, args.verbose) for year in years)
 
 
 ###########################################################
-def tc_tracking_worker(cy_slp_finname, verbose=False):
-    """Track tropical cyclones for a single annual file."""
+def tc_tracking_worker(year: int, verbose: bool = False) -> None:
+    """Track tropical cyclones for a single year."""
     logger = get_logger("atmotrack", level=logging.DEBUG if verbose else logging.INFO)
-    logger.info(f"Analyzing {cy_slp_finname}")
+    logger.info(f"Analyzing year {year}")
     start_time = time.time()
 
-    # Derive year from filename (last 4 chars before .nc)
-    year = cy_slp_finname[-7:-3]
-
-    # Load pre-computed SLP cyclone objects
-    ds_cy = xr.open_dataset(cy_slp_finname).squeeze()
+    # Load pre-computed SLP cyclone objects (internal tracking output)
+    cy_slp_path = pathlib.Path(cfg.data_tracking) / f"cy_slp_{year:04d}.nc"
+    ds_cy = xr.open_dataset(cy_slp_path).squeeze()
     cy_slp_objects = ds_cy.cy_slp_objects.values.astype(int)
 
-    # Load 850 hPa temperature
-    fin_850 = f"{cfg.data_era5}/era5_daily_850hPa_{year}.nc"
-    ds850 = xr.open_dataset(fin_850).squeeze()
-    t850_data = ds850.t.values
+    # Load 850 hPa temperature and SLP from configured input source
+    ds_850 = slice_year(open_pattern("pattern_z850"), year)
+    ds_slp = slice_year(open_pattern("pattern_slp"), year)
+    t850_data = ds_850[cfg.var_t850].values
+    slp_data = ds_slp[cfg.var_msl].values
 
-    # Load SLP (Pa)
-    fin_slp = f"{cfg.data_era5}/era5_daily_SLP_{year}.nc"
-    ds_slp = xr.open_dataset(fin_slp).squeeze()
-    slp_data = ds_slp.msl.values
-
-    # Build coordinate grids and time axis
-    lat = ds_slp.latitude.values
-    lon = ds_slp.longitude.values
-    lon2d, lat2d = np.meshgrid(lon, lat)
-
-    times = pd.date_range(
-        ds_slp.valid_time.isel(valid_time=0).values,
-        end=ds_slp.valid_time.isel(valid_time=-1).values,
-        freq="6h",
-    )
+    lon2d, lat2d = load_grid(ds_slp)
+    times = load_times(ds_slp)
 
     logger.debug(f"Loading data: {time.time() - start_time:.2f} s")
     start_time = time.time()
 
-    fileout_tc = f"{cfg.data_tracking}/era5_daily_tc_{year}.nc"
+    fileout_tc = pathlib.Path(cfg.data_tracking) / f"tc_{year:04d}.nc"
 
-    TC_tracking(cy_slp_objects, t850_data, slp_data, lon2d, lat2d, times=times, nc_file=fileout_tc)
+    TC_tracking(
+        cy_slp_objects,
+        t850_data,
+        slp_data,
+        lon2d,
+        lat2d,
+        times=times,
+        nc_file=str(fileout_tc),
+    )
 
-    logger.info(f"DONE {cy_slp_finname} in {time.time() - start_time:.2f} s")
+    logger.info(f"DONE year {year} in {time.time() - start_time:.2f} s")
 
 
 ###############################################################################

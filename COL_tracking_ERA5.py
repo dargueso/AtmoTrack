@@ -1,36 +1,36 @@
 #!/usr/bin/env python
 """
-COL_tracking_ERA5.py — Cut-Off Low tracking from ERA5 data.
+COL_tracking_ERA5.py — Cut-Off Low tracking from any CF-compliant dataset.
 
-For each annual ERA5 file in ``data_era5/``:
+For each year in the configured input dataset:
   1. Loads 500, 200, 850 hPa geopotential/wind/temperature and precipitation.
   2. Runs CY_ACY_z500_tracking to identify upper-level cyclones.
   3. Runs COL_tracking to classify cut-off lows within a configured region.
   4. Writes a per-year NetCDF to ``data_tracking/``.
 
-All parameters (thresholds, domain, paths) are read from ``config.toml``.
+All parameters (thresholds, domain, paths, variable names) are read from
+``config.toml``.  Set ``[data_source]`` keys to switch between ERA5, WRF, etc.
 """
 
 import argparse
 import logging
 import os
+import pathlib
 import time
-from glob import glob
 
 import numpy as np
-import pandas as pd
-import xarray as xr
 from joblib import Parallel, delayed
 
 import atmotrack_config as cfg
+from atmotrack_io import available_years, load_grid, load_times, open_pattern, slice_year
 from tracking_functions import COL_tracking, CY_ACY_z500_tracking
 from utils import get_logger
 
 
 ###########################################################
 def main():
-    """Loop over available annual files and track COLs in parallel."""
-    parser = argparse.ArgumentParser(description="COL tracking from ERA5 data.")
+    """Loop over available years and track COLs in parallel."""
+    parser = argparse.ArgumentParser(description="COL tracking from input data.")
     parser.add_argument(
         "--year-start",
         type=int,
@@ -60,12 +60,12 @@ def main():
         "atmotrack", log_file="out.log", level=logging.DEBUG if args.verbose else logging.INFO
     )
     os.makedirs(cfg.data_tracking, exist_ok=True)
-    filesin = sorted(
-        f
-        for f in glob(f"{cfg.data_era5}/era5_daily_500hPa_????.nc")
-        if args.year_start <= int(f[-7:-3]) <= args.year_end
-    )
-    n_jobs = min(len(filesin), args.jobs)
+
+    ds_z500 = open_pattern("pattern_z500")
+    years = [y for y in available_years(ds_z500) if args.year_start <= y <= args.year_end]
+    ds_z500.close()
+
+    n_jobs = min(len(years), args.jobs)
     # Limit BLAS threads to 1 per worker to avoid thread contention on
     # many-core machines where numpy/scipy would otherwise claim all CPUs.
     for _var in (
@@ -75,30 +75,28 @@ def main():
         "NUMEXPR_NUM_THREADS",
     ):
         os.environ[_var] = "1"
-    Parallel(n_jobs=n_jobs)(
-        delayed(cutofflow_tracking)(fin_name, args.verbose) for fin_name in filesin
-    )
+    Parallel(n_jobs=n_jobs)(delayed(cutofflow_tracking)(year, args.verbose) for year in years)
 
 
 ###########################################################
-def cutofflow_tracking(z500_finname, verbose=False):
-    """Track COLs for a single annual file."""
+def cutofflow_tracking(year: int, verbose: bool = False) -> None:
+    """Track COLs for a single year."""
     logger = get_logger("atmotrack", level=logging.DEBUG if verbose else logging.INFO)
-    logger.info(f"Analyzing {z500_finname}")
+    logger.info(f"Analyzing year {year}")
     start_time = time.time()
 
-    z500 = xr.open_dataset(z500_finname).squeeze()
-    z200 = xr.open_dataset(z500_finname.replace("500hPa", "200hPa")).squeeze()
-    z850 = xr.open_dataset(z500_finname.replace("500hPa", "850hPa")).squeeze()
-    pr = xr.open_dataset(z500_finname.replace("500hPa", "PR")).squeeze()
+    z500 = slice_year(open_pattern("pattern_z500"), year)
+    z200 = slice_year(open_pattern("pattern_z200"), year)
+    z850 = slice_year(open_pattern("pattern_z850"), year)
+    pr = slice_year(open_pattern("pattern_pr"), year)
 
-    z500_data = z500.z.values
-    u200_data = z200.u.values
-    t850_data = z850.t.values
-    u850_data = z850.u.values
-    v850_data = z850.v.values
-    pr_data = pr.tp.resample(valid_time="6h").sum().values * 1000.0
-    pr_data_max = pr.tp.resample(valid_time="6h").max().values * 1000.0
+    z500_data = z500[cfg.var_z500].values
+    u200_data = z200[cfg.var_u200].values
+    t850_data = z850[cfg.var_t850].values
+    u850_data = z850[cfg.var_u850].values
+    v850_data = z850[cfg.var_v850].values
+    pr_data = pr[cfg.var_pr].resample({cfg.time_var: "6h"}).sum().values * 1000.0
+    pr_data_max = pr[cfg.var_pr].resample({cfg.time_var: "6h"}).max().values * 1000.0
 
     if z500_data.shape != pr_data.shape:
         logger.debug(f"WARNING: Data shapes do not match: {z500_data.shape} vs {pr_data.shape}")
@@ -106,21 +104,13 @@ def cutofflow_tracking(z500_finname, verbose=False):
         pr_data = np.pad(pr_data, ((diff_times, 0), (0, 0), (0, 0)), constant_values=0)
         pr_data_max = np.pad(pr_data_max, ((diff_times, 0), (0, 0), (0, 0)), constant_values=0)
 
-    lat = z500.latitude.values
-    lon = z500.longitude.values
-    lon2d, lat2d = np.meshgrid(lon, lat)
-    times = pd.date_range(
-        z500.valid_time.isel(valid_time=0).values,
-        end=z500.valid_time.isel(valid_time=-1).values,
-        freq="6h",
-    )
+    lon2d, lat2d = load_grid(z500)
+    times = load_times(z500)
 
     logger.debug(f"Loading data: {time.time() - start_time:.2f} s")
     start_time = time.time()
 
-    fileout_col = z500_finname.replace("500hPa", "col_z500").replace(
-        cfg.data_era5, cfg.data_tracking
-    )
+    fileout_col = pathlib.Path(cfg.data_tracking) / f"col_z500_{year:04d}.nc"
 
     cy_z500_objects, _ = CY_ACY_z500_tracking(z500_data, times, lon2d, lat2d, nc_file=None)
 
@@ -136,10 +126,10 @@ def cutofflow_tracking(z500_finname, verbose=False):
         times=times,
         Lon=lon2d,
         Lat=lat2d,
-        nc_file=fileout_col,
+        nc_file=str(fileout_col),
     )
 
-    logger.info(f"DONE {z500_finname} in {time.time() - start_time:.2f} s")
+    logger.info(f"DONE year {year} in {time.time() - start_time:.2f} s")
 
 
 ###############################################################################

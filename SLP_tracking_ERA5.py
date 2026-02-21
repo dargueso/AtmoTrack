@@ -1,35 +1,34 @@
 #!/usr/bin/env python
 """
-SLP_tracking_ERA5.py — Surface Cyclone / Anticyclone tracking from ERA5 SLP.
+SLP_tracking_ERA5.py — Surface Cyclone / Anticyclone tracking from SLP.
 
-For each annual ERA5 SLP file in ``data_era5/``:
+For each year in the configured input dataset:
   1. Loads mean sea-level pressure (msl, Pa).
   2. Computes a smoothed anomaly and labels cyclonic / anticyclonic objects.
   3. Writes a per-year NetCDF to ``data_tracking/``.
 
-All parameters (thresholds, paths) are read from ``config.toml``.
+All parameters (thresholds, paths, variable names) are read from ``config.toml``.
+Set ``[data_source]`` keys to switch between ERA5, WRF, etc.
 """
 
 import argparse
 import logging
 import os
+import pathlib
 import time
-from glob import glob
 
-import numpy as np
-import pandas as pd
-import xarray as xr
 from joblib import Parallel, delayed
 
 import atmotrack_config as cfg
+from atmotrack_io import available_years, load_grid, load_times, open_pattern, slice_year
 from tracking_functions import CY_ACY_slp_tracking
 from utils import get_logger
 
 
 ###########################################################
 def main():
-    """Loop over available annual SLP files and track surface CY/ACY in parallel."""
-    parser = argparse.ArgumentParser(description="Surface CY/ACY tracking from ERA5 SLP.")
+    """Loop over available years and track surface CY/ACY in parallel."""
+    parser = argparse.ArgumentParser(description="Surface CY/ACY tracking from SLP.")
     parser.add_argument(
         "--year-start",
         type=int,
@@ -59,12 +58,12 @@ def main():
         "atmotrack", log_file="out.log", level=logging.DEBUG if args.verbose else logging.INFO
     )
     os.makedirs(cfg.data_tracking, exist_ok=True)
-    filesin = sorted(
-        f
-        for f in glob(f"{cfg.data_era5}/era5_daily_SLP_????.nc")
-        if args.year_start <= int(f[-7:-3]) <= args.year_end
-    )
-    n_jobs = min(len(filesin), args.jobs)
+
+    ds_slp = open_pattern("pattern_slp")
+    years = [y for y in available_years(ds_slp) if args.year_start <= y <= args.year_end]
+    ds_slp.close()
+
+    n_jobs = min(len(years), args.jobs)
     for _var in (
         "OMP_NUM_THREADS",
         "MKL_NUM_THREADS",
@@ -72,38 +71,31 @@ def main():
         "NUMEXPR_NUM_THREADS",
     ):
         os.environ[_var] = "1"
-    Parallel(n_jobs=n_jobs)(delayed(slp_tracking)(fin_name, args.verbose) for fin_name in filesin)
+    Parallel(n_jobs=n_jobs)(delayed(slp_tracking)(year, args.verbose) for year in years)
 
 
 ###########################################################
-def slp_tracking(slp_finname, verbose=False):
-    """Track surface cyclones/anticyclones for a single annual file."""
+def slp_tracking(year: int, verbose: bool = False) -> None:
+    """Track surface cyclones/anticyclones for a single year."""
     logger = get_logger("atmotrack", level=logging.DEBUG if verbose else logging.INFO)
-    logger.info(f"Analyzing {slp_finname}")
+    logger.info(f"Analyzing year {year}")
     start_time = time.time()
 
-    ds = xr.open_dataset(slp_finname).squeeze()
+    ds = slice_year(open_pattern("pattern_slp"), year)
 
     # msl is in Pa; conversion to hPa happens inside CY_ACY_slp_tracking
-    slp_data = ds.msl.values
+    slp_data = ds[cfg.var_msl].values
 
-    lat = ds.latitude.values
-    lon = ds.longitude.values
-    lon2d, lat2d = np.meshgrid(lon, lat)
-
-    times = pd.date_range(
-        ds.valid_time.isel(valid_time=0).values,
-        end=ds.valid_time.isel(valid_time=-1).values,
-        freq="6h",
-    )
+    lon2d, lat2d = load_grid(ds)
+    times = load_times(ds)
 
     logger.debug(f"Loading data: {time.time() - start_time:.2f} s")
 
-    fileout = slp_finname.replace("SLP", "cy_slp").replace(cfg.data_era5, cfg.data_tracking)
+    fileout = pathlib.Path(cfg.data_tracking) / f"cy_slp_{year:04d}.nc"
 
-    _, _ = CY_ACY_slp_tracking(slp_data, times, lon2d, lat2d, nc_file=fileout)
+    _, _ = CY_ACY_slp_tracking(slp_data, times, lon2d, lat2d, nc_file=str(fileout))
 
-    logger.info(f"DONE {slp_finname} in {time.time() - start_time:.2f} s")
+    logger.info(f"DONE year {year} in {time.time() - start_time:.2f} s")
 
 
 ###############################################################################

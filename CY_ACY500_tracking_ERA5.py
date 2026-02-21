@@ -1,35 +1,34 @@
 #!/usr/bin/env python
 """
-CY_ACY500_tracking_ERA5.py — 500 hPa Cyclone / Anticyclone tracking from ERA5.
+CY_ACY500_tracking_ERA5.py — 500 hPa Cyclone / Anticyclone tracking.
 
-For each annual ERA5 500 hPa file in ``data_era5/``:
-  1. Loads geopotential height at 500 hPa.
+For each year in the configured input dataset:
+  1. Loads geopotential at 500 hPa.
   2. Computes a smoothed anomaly and labels cyclonic / anticyclonic objects.
   3. Writes a per-year NetCDF to ``data_tracking/``.
 
-All parameters (thresholds, paths) are read from ``config.toml``.
+All parameters (thresholds, paths, variable names) are read from ``config.toml``.
+Set ``[data_source]`` keys to switch between ERA5, WRF, etc.
 """
 
 import argparse
 import logging
 import os
+import pathlib
 import time
-from glob import glob
 
-import numpy as np
-import pandas as pd
-import xarray as xr
 from joblib import Parallel, delayed
 
 import atmotrack_config as cfg
+from atmotrack_io import available_years, load_grid, load_times, open_pattern, slice_year
 from tracking_functions import CY_ACY_z500_tracking
 from utils import get_logger
 
 
 ###########################################################
 def main():
-    """Loop over available annual files and track upper-level CY/ACY in parallel."""
-    parser = argparse.ArgumentParser(description="500 hPa CY/ACY tracking from ERA5 data.")
+    """Loop over available years and track upper-level CY/ACY in parallel."""
+    parser = argparse.ArgumentParser(description="500 hPa CY/ACY tracking.")
     parser.add_argument(
         "--year-start",
         type=int,
@@ -59,12 +58,12 @@ def main():
         "atmotrack", log_file="out.log", level=logging.DEBUG if args.verbose else logging.INFO
     )
     os.makedirs(cfg.data_tracking, exist_ok=True)
-    filesin = sorted(
-        f
-        for f in glob(f"{cfg.data_era5}/era5_daily_500hPa_????.nc")
-        if args.year_start <= int(f[-7:-3]) <= args.year_end
-    )
-    n_jobs = min(len(filesin), args.jobs)
+
+    ds_z500 = open_pattern("pattern_z500")
+    years = [y for y in available_years(ds_z500) if args.year_start <= y <= args.year_end]
+    ds_z500.close()
+
+    n_jobs = min(len(years), args.jobs)
     for _var in (
         "OMP_NUM_THREADS",
         "MKL_NUM_THREADS",
@@ -72,38 +71,29 @@ def main():
         "NUMEXPR_NUM_THREADS",
     ):
         os.environ[_var] = "1"
-    Parallel(n_jobs=n_jobs)(
-        delayed(cy_z500_tracking)(fin_name, args.verbose) for fin_name in filesin
-    )
+    Parallel(n_jobs=n_jobs)(delayed(cy_z500_tracking)(year, args.verbose) for year in years)
 
 
 ###########################################################
-def cy_z500_tracking(z500_finname, verbose=False):
-    """Track 500 hPa cyclones/anticyclones for a single annual file."""
+def cy_z500_tracking(year: int, verbose: bool = False) -> None:
+    """Track 500 hPa cyclones/anticyclones for a single year."""
     logger = get_logger("atmotrack", level=logging.DEBUG if verbose else logging.INFO)
-    logger.info(f"Analyzing {z500_finname}")
+    logger.info(f"Analyzing year {year}")
     start_time = time.time()
 
-    z500 = xr.open_dataset(z500_finname).squeeze()
-    z500_data = z500.z.values
+    ds = slice_year(open_pattern("pattern_z500"), year)
+    z500_data = ds[cfg.var_z500].values
 
-    lat = z500.latitude.values
-    lon = z500.longitude.values
-    lon2d, lat2d = np.meshgrid(lon, lat)
-
-    times = pd.date_range(
-        z500.valid_time.isel(valid_time=0).values,
-        end=z500.valid_time.isel(valid_time=-1).values,
-        freq="6h",
-    )
+    lon2d, lat2d = load_grid(ds)
+    times = load_times(ds)
 
     logger.debug(f"Loading data: {time.time() - start_time:.2f} s")
 
-    fileout = z500_finname.replace("500hPa", "cy_z500").replace(cfg.data_era5, cfg.data_tracking)
+    fileout = pathlib.Path(cfg.data_tracking) / f"cy_z500_{year:04d}.nc"
 
-    _, _ = CY_ACY_z500_tracking(z500_data, times, lon2d, lat2d, nc_file=fileout)
+    _, _ = CY_ACY_z500_tracking(z500_data, times, lon2d, lat2d, nc_file=str(fileout))
 
-    logger.info(f"DONE {z500_finname} in {time.time() - start_time:.2f} s")
+    logger.info(f"DONE year {year} in {time.time() - start_time:.2f} s")
 
 
 ###############################################################################
