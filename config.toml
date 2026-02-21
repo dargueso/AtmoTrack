@@ -14,8 +14,11 @@ DT = 6          # data time step [hours]
 # ---------------------------------------------------------------------------
 [paths]
 # ---------------------------------------------------------------------------
-# Directory containing ERA5 input NetCDF files
+# Directory containing ERA5 input NetCDF files (used by download_ERA5.py)
 data_era5     = "./data_era5"
+
+# Directory containing input data for tracking (any source; defaults to data_era5)
+data_input    = "./data_era5"
 
 # Directory where tracking output NetCDF files are written
 data_tracking = "./data_tracking"
@@ -132,3 +135,51 @@ TC_T850min      = 273.15 # minimum 850 hPa core temperature [K]
 TC_Pmin         = 980.0  # minimum SLP threshold [hPa]
 TC_lat_max      = 60.0   # maximum abs latitude cutoff [°]
 TC_min_duration = 16     # minimum object timestep count (2 × 8 steps @ 6-hourly)
+
+# ---------------------------------------------------------------------------
+[data_source]
+# Input data configuration — edit these when switching from ERA5 to another
+# source (WRF, CESM, regional models, …).  The defaults reproduce the current
+# ERA5 behaviour exactly, so existing ERA5 users need not change anything.
+# ---------------------------------------------------------------------------
+
+# ── Coordinate names ────────────────────────────────────────────────────────
+# Name of the latitude coordinate / variable in input NetCDF files.
+# For ERA5: "latitude" (1-D).  For WRF: "XLAT" (2-D).
+lat_var   = "latitude"
+
+# Name of the longitude coordinate / variable.
+# For ERA5: "longitude" (1-D).  For WRF: "XLONG" (2-D).
+lon_var   = "longitude"
+
+# Set to true when lat/lon arrays are already 2-D (e.g. WRF Lambert Conformal).
+# When false (ERA5-style), 1-D arrays are expanded with np.meshgrid.
+lat_is_2d = false
+
+# Name of the CF-compliant time dimension.
+# For ERA5: "valid_time".  For WRF/most CF files: "time".
+time_var  = "valid_time"
+
+# ── Glob patterns (relative to data_input) ──────────────────────────────────
+# Shell-style wildcards; * matches any characters including digits.
+# Multiple matching files are merged automatically into one dataset.
+# Files do NOT need to be organised one-per-year.
+pattern_z500 = "era5_daily_500hPa_*.nc"
+pattern_z200 = "era5_daily_200hPa_*.nc"
+pattern_z850 = "era5_daily_850hPa_*.nc"
+pattern_slp  = "era5_daily_SLP_*.nc"
+pattern_pr   = "era5_daily_PR_*.nc"
+pattern_ivt  = "era5_daily_IVT_*.nc"
+
+# ── Variable names within each input file ───────────────────────────────────
+var_z500 = "z"      # 500 hPa geopotential [m²/s²]
+var_u200 = "u"      # 200 hPa u-wind [m/s]
+var_v200 = "v"      # 200 hPa v-wind [m/s]
+var_u850 = "u"      # 850 hPa u-wind [m/s]
+var_v850 = "v"      # 850 hPa v-wind [m/s]
+var_t850 = "t"      # 850 hPa temperature [K]
+var_msl  = "msl"    # mean sea-level pressure [Pa]
+var_pr   = "tp"     # total precipitation [m] (resampled to 6-hourly and scaled to mm)
+var_q850 = "q"      # 850 hPa specific humidity [kg/kg]
+var_ivte = "ivte"   # eastward integrated vapour transport [kg m⁻¹ s⁻¹]
+var_ivtn = "ivtn"   # northward integrated vapour transport [kg m⁻¹ s⁻¹]
