@@ -65,6 +65,7 @@ def open_pattern(pattern_key: str) -> xr.Dataset:
         combine="nested",
         concat_dim=cfg.time_var,
         preprocess=_drop_expver,
+        compat="override",
     )
 
 
