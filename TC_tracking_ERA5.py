@@ -76,6 +76,20 @@ def main():
         if args.year_start <= int(f.stem[-4:]) <= args.year_end
     ]
 
+    if not years:
+        logger = get_logger("atmotrack")
+        all_cy_years = [int(f.stem[-4:]) for f in cy_slp_files]
+        if all_cy_years:
+            logger.warning(
+                f"No cy_slp files found for {args.year_start}–{args.year_end}. "
+                f"Available years: {all_cy_years}"
+            )
+        else:
+            logger.warning(
+                f"No cy_slp files found in {cy_slp_dir}. Run SLP_tracking_ERA5.py first."
+            )
+        return
+
     n_jobs = min(len(years), args.jobs)
     # Limit BLAS threads to 1 per worker to avoid thread contention on
     # many-core machines where numpy/scipy would otherwise claim all CPUs.

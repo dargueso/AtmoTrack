@@ -60,8 +60,16 @@ def main():
     os.makedirs(cfg.data_tracking, exist_ok=True)
 
     ds_z500 = open_pattern("pattern_z500")
-    years = [y for y in available_years(ds_z500) if args.year_start <= y <= args.year_end]
+    all_years = available_years(ds_z500)
+    years = [y for y in all_years if args.year_start <= y <= args.year_end]
     ds_z500.close()
+
+    if not years:
+        get_logger("atmotrack").warning(
+            f"No data found for {args.year_start}–{args.year_end}. "
+            f"Available years in input files: {all_years}"
+        )
+        return
 
     n_jobs = min(len(years), args.jobs)
     for _var in (
