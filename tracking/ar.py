@@ -124,6 +124,7 @@ def AR_850hPa_tracking(VapTrans, times, Lon, Lat, nc_file=None):
             nc_file,
             mode="w",
             encoding={
+                "time": {"units": "hours since 1900-01-01 00:00:00", "calendar": "standard", "dtype": "int32"},
                 "ar850_objects": {"zlib": True, "complevel": 5},
                 "VapTrans": {"zlib": True, "complevel": 5},
             },
@@ -208,6 +209,7 @@ def AR_IVT_tracking(IVT, times, Lon, Lat, nc_file=None):
             nc_file,
             mode="w",
             encoding={
+                "time": {"units": "hours since 1900-01-01 00:00:00", "calendar": "standard", "dtype": "int32"},
                 "ar_ivt_objects": {"zlib": True, "complevel": 5},
                 "IVT": {"zlib": True, "complevel": 5},
             },
