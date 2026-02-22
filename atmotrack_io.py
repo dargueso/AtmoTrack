@@ -53,7 +53,18 @@ def open_pattern(pattern_key: str) -> xr.Dataset:
         )
     if len(files) == 1:
         return xr.open_dataset(files[0])
-    return xr.open_mfdataset(files, combine="by_coords")
+    # combine="nested" + concat_dim avoids failures when ERA5 files have
+    # inconsistent auxiliary coordinates (e.g. 'expver' present in some
+    # files but not others).  compat="override" + coords/data_vars="minimal"
+    # suppress the related FutureWarning and skip coordinate reconciliation.
+    return xr.open_mfdataset(
+        files,
+        combine="nested",
+        concat_dim=cfg.time_var,
+        compat="override",
+        coords="minimal",
+        data_vars="minimal",
+    )
 
 
 def available_years(ds: xr.Dataset) -> list:
