@@ -53,17 +53,17 @@ def open_pattern(pattern_key: str) -> xr.Dataset:
         )
     if len(files) == 1:
         return xr.open_dataset(files[0])
-    # combine="nested" + concat_dim avoids failures when ERA5 files have
-    # inconsistent auxiliary coordinates (e.g. 'expver' present in some
-    # files but not others).  compat="override" + coords/data_vars="minimal"
-    # suppress the related FutureWarning and skip coordinate reconciliation.
+    # ERA5 files from different reanalysis streams (ERA5 vs ERA5 back-extension)
+    # may carry an 'expver' coordinate in some files but not others.  Drop it
+    # in preprocess so xarray never attempts to concat it across datasets.
+    def _drop_expver(ds: xr.Dataset) -> xr.Dataset:
+        return ds.drop_vars("expver", errors="ignore")
+
     return xr.open_mfdataset(
         files,
         combine="nested",
         concat_dim=cfg.time_var,
-        compat="override",
-        coords="minimal",
-        data_vars="minimal",
+        preprocess=_drop_expver,
     )
 
 
