@@ -237,10 +237,16 @@ def TC_tracking(CY_objects, t850, slp, Lon, Lat, times=None, nc_file=None):
 
         fino = xr.Dataset(ds_vars, coords=coords)
 
+        time_enc = (
+            {"time": {"units": "hours since 1900-01-01 00:00:00", "calendar": "standard", "dtype": "int32"}}
+            if times is not None
+            else {}
+        )
         fino.to_netcdf(
             nc_file,
             mode="w",
             encoding={
+                **time_enc,
                 "tc_objects": {"zlib": True, "complevel": 5},
                 "slp": {"zlib": True, "complevel": 5},
             },

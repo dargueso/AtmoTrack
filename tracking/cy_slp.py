@@ -266,6 +266,7 @@ def CY_ACY_slp_tracking(
             nc_file,
             mode="w",
             encoding={
+                "time": {"units": "hours since 1900-01-01 00:00:00", "calendar": "standard", "dtype": "int32"},
                 "slp": {"zlib": True, "complevel": 5},
                 "cy_slp_objects": {"zlib": True, "complevel": 5},
                 "acy_slp_objects": {"zlib": True, "complevel": 5},

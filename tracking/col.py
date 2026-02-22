@@ -455,16 +455,12 @@ def COL_tracking(
         fino["pr"].attrs["description"] = "Accumulated Precipitation"
         fino["pr_max"].attrs["description"] = "Maximum precipitation rate"
 
-        reference_date = np.datetime64("1940-01-01T00:00:00")
-        fino["time"] = (fino["time"] - reference_date) / np.timedelta64(1, "h")
-        fino["time"].attrs["units"] = f"hours since {reference_date}"
-        fino["time"].attrs["calendar"] = "standard"
-
         fino.to_netcdf(
             nc_file,
             mode="w",
             format="NETCDF4",
             encoding={
+                "time": {"units": "hours since 1900-01-01 00:00:00", "calendar": "standard", "dtype": "int32"},
                 "z500": {"zlib": True, "complevel": 5},
                 "u200": {"zlib": True, "complevel": 5},
                 "cy_z500_objects": {"zlib": True, "complevel": 5},
