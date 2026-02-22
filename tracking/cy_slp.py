@@ -251,13 +251,15 @@ def CY_ACY_slp_tracking(
 
         fino = xr.Dataset(
             {
-                "cy_slp_objects": (["time", "y", "x"], cy_slp_objects),
-                "acy_slp_objects": (["time", "y", "x"], acy_slp_objects),
-                "slp": (["time", "y", "x"], slp_data),
-                "lat": (["y", "x"], Lat),
-                "lon": (["y", "x"], Lon),
+                "cy_slp_objects": (["time", "latitude", "longitude"], cy_slp_objects),
+                "acy_slp_objects": (["time", "latitude", "longitude"], acy_slp_objects),
+                "slp": (["time", "latitude", "longitude"], slp_data),
             },
-            coords={"time": times.values},
+            coords={
+                "time": times.values,
+                "latitude": Lat[:, 0].squeeze(),
+                "longitude": Lon[0, :].squeeze(),
+            },
         )
 
         fino.to_netcdf(

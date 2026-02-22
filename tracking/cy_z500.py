@@ -120,13 +120,15 @@ def CY_ACY_z500_tracking(z500_data, times, Lon, Lat, nc_file=None):
 
         fino = xr.Dataset(
             {
-                "cy_z500_objects": (["time", "y", "x"], cy_z500_objects),
-                "acy_z500_objects": (["time", "y", "x"], acy_z500_objects),
-                "z500": (["time", "y", "x"], z500_data),
-                "lat": (["y", "x"], Lat),
-                "lon": (["y", "x"], Lon),
+                "cy_z500_objects": (["time", "latitude", "longitude"], cy_z500_objects),
+                "acy_z500_objects": (["time", "latitude", "longitude"], acy_z500_objects),
+                "z500": (["time", "latitude", "longitude"], z500_data),
             },
-            coords={"time": times.values},
+            coords={
+                "time": times.values,
+                "latitude": Lat[:, 0].squeeze(),
+                "longitude": Lon[0, :].squeeze(),
+            },
         )
 
         fino.to_netcdf(
