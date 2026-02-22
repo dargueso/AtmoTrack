@@ -99,7 +99,12 @@ def ar_ivt_tracking_worker(year: int, verbose: bool = False) -> None:
 
     lon2d, lat2d = load_grid(ds)
     times = load_times(ds)
-    cfg.DT = infer_dt(times)
+    _dt_data = infer_dt(times)
+    if _dt_data != cfg.DT:
+        logger.warning(
+            f"Data timestep ({_dt_data} h) differs from config DT ({cfg.DT} h). "
+            "Tracking thresholds use cfg.DT — update [general] DT in config.toml if needed."
+        )
 
     logger.debug(f"Loading data: {time.time() - start_time:.2f} s")
     start_time = time.time()

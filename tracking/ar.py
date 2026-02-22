@@ -107,7 +107,10 @@ def AR_850hPa_tracking(VapTrans, times, Lon, Lat, nc_file=None):
 
         fino = xr.Dataset(
             {
-                "ar850_objects": (["time", "latitude", "longitude"], ar850_objects.astype(np.int16)),
+                "ar850_objects": (
+                    ["time", "latitude", "longitude"],
+                    ar850_objects.astype(np.int16),
+                ),
                 "VapTrans": (["time", "latitude", "longitude"], VapTrans.astype(np.float32)),
             },
             coords={
@@ -188,7 +191,10 @@ def AR_IVT_tracking(IVT, times, Lon, Lat, nc_file=None):
 
         fino = xr.Dataset(
             {
-                "ar_ivt_objects": (["time", "latitude", "longitude"], ar_ivt_objects.astype(np.int16)),
+                "ar_ivt_objects": (
+                    ["time", "latitude", "longitude"],
+                    ar_ivt_objects.astype(np.int16),
+                ),
                 "IVT": (["time", "latitude", "longitude"], IVT.astype(np.float32)),
             },
             coords={

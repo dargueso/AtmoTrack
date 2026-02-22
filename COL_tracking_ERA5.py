@@ -114,7 +114,12 @@ def cutofflow_tracking(year: int, verbose: bool = False) -> None:
 
     lon2d, lat2d = load_grid(z500)
     times = load_times(z500)
-    cfg.DT = infer_dt(times)
+    _dt_data = infer_dt(times)
+    if _dt_data != cfg.DT:
+        logger.warning(
+            f"Data timestep ({_dt_data} h) differs from config DT ({cfg.DT} h). "
+            "Tracking thresholds use cfg.DT — update [general] DT in config.toml if needed."
+        )
 
     logger.debug(f"Loading data: {time.time() - start_time:.2f} s")
     start_time = time.time()

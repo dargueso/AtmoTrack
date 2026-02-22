@@ -61,6 +61,7 @@ markers = [
 # ---------------------------------------------------------------------------
 line-length = 100
 target-version = "py311"
+exclude = ["Tracking_Functions_old.py"]
 
 [tool.ruff.lint]
 # E/W: pycodestyle  F: pyflakes  I: isort  UP: pyupgrade  NPY: numpy style
