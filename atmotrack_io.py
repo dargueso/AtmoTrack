@@ -53,6 +53,7 @@ def open_pattern(pattern_key: str) -> xr.Dataset:
         )
     if len(files) == 1:
         return xr.open_dataset(files[0])
+
     # ERA5 files from different reanalysis streams (ERA5 vs ERA5 back-extension)
     # may carry an 'expver' coordinate in some files but not others.  Drop it
     # in preprocess so xarray never attempts to concat it across datasets.
