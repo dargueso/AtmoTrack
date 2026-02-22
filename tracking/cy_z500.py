@@ -135,7 +135,11 @@ def CY_ACY_z500_tracking(z500_data, times, Lon, Lat, nc_file=None):
             nc_file,
             mode="w",
             encoding={
-                "time": {"units": "hours since 1900-01-01 00:00:00", "calendar": "standard", "dtype": "int32"},
+                "time": {
+                    "units": "hours since 1900-01-01 00:00:00",
+                    "calendar": "standard",
+                    "dtype": "int32",
+                },
                 "z500": {"zlib": True, "complevel": 5},
                 "cy_z500_objects": {"zlib": True, "complevel": 5},
                 "acy_z500_objects": {"zlib": True, "complevel": 5},
