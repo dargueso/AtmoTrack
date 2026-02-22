@@ -22,7 +22,7 @@ import numpy as np
 from joblib import Parallel, delayed
 
 import atmotrack_config as cfg
-from atmotrack_io import available_years, load_grid, load_times, open_pattern, slice_year
+from atmotrack_io import available_years, infer_dt, load_grid, load_times, open_pattern, slice_year
 from tracking_functions import COL_tracking, CY_ACY_z500_tracking
 from utils import get_logger
 
@@ -114,6 +114,7 @@ def cutofflow_tracking(year: int, verbose: bool = False) -> None:
 
     lon2d, lat2d = load_grid(z500)
     times = load_times(z500)
+    cfg.DT = infer_dt(times)
 
     logger.debug(f"Loading data: {time.time() - start_time:.2f} s")
     start_time = time.time()

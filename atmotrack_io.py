@@ -122,3 +122,24 @@ def load_times(ds: xr.Dataset) -> pd.DatetimeIndex:
     it automatically, so no manual unit conversion is needed.
     """
     return pd.DatetimeIndex(ds[cfg.time_var].values)
+
+
+def infer_dt(times: pd.DatetimeIndex) -> int:
+    """Infer the timestep in hours from a DatetimeIndex.
+
+    Uses the gap between the first two timestamps.  Falls back to ``cfg.DT``
+    when fewer than two timestamps are available.
+
+    Parameters
+    ----------
+    times:
+        Sorted DatetimeIndex returned by :func:`load_times`.
+
+    Returns
+    -------
+    int
+        Timestep in hours (e.g. 3 for 3-hourly data, 6 for 6-hourly).
+    """
+    if len(times) < 2:
+        return int(cfg.DT)
+    return int((times[1] - times[0]).total_seconds() / 3600)
