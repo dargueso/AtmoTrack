@@ -45,6 +45,11 @@ def main():
         metavar="YEAR",
         help="Last year to process (default: 2024)",
     )
+    parser.add_argument(
+        "--current-year",
+        action="store_true",
+        help="Process the current (possibly incomplete) year; overrides --year-start/--year-end",
+    )
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable DEBUG-level logging")
     parser.add_argument(
         "--jobs",
@@ -55,6 +60,8 @@ def main():
         help="Number of parallel workers (default: 8)",
     )
     args = parser.parse_args()
+    if args.current_year:
+        args.year_start = args.year_end = time.localtime().tm_year
 
     get_logger(
         "atmotrack", log_file="out.log", level=logging.DEBUG if args.verbose else logging.INFO
