@@ -107,12 +107,14 @@ def AR_850hPa_tracking(VapTrans, times, Lon, Lat, nc_file=None):
 
         fino = xr.Dataset(
             {
-                "ar850_objects": (["time", "y", "x"], ar850_objects.astype(np.int16)),
-                "VapTrans": (["time", "y", "x"], VapTrans.astype(np.float32)),
-                "lat": (["y", "x"], Lat),
-                "lon": (["y", "x"], Lon),
+                "ar850_objects": (["time", "latitude", "longitude"], ar850_objects.astype(np.int16)),
+                "VapTrans": (["time", "latitude", "longitude"], VapTrans.astype(np.float32)),
             },
-            coords={"time": times.values},
+            coords={
+                "time": times.values,
+                "latitude": Lat[:, 0].squeeze(),
+                "longitude": Lon[0, :].squeeze(),
+            },
         )
 
         fino.to_netcdf(
@@ -186,12 +188,14 @@ def AR_IVT_tracking(IVT, times, Lon, Lat, nc_file=None):
 
         fino = xr.Dataset(
             {
-                "ar_ivt_objects": (["time", "y", "x"], ar_ivt_objects.astype(np.int16)),
-                "IVT": (["time", "y", "x"], IVT.astype(np.float32)),
-                "lat": (["y", "x"], Lat),
-                "lon": (["y", "x"], Lon),
+                "ar_ivt_objects": (["time", "latitude", "longitude"], ar_ivt_objects.astype(np.int16)),
+                "IVT": (["time", "latitude", "longitude"], IVT.astype(np.float32)),
             },
-            coords={"time": times.values},
+            coords={
+                "time": times.values,
+                "latitude": Lat[:, 0].squeeze(),
+                "longitude": Lon[0, :].squeeze(),
+            },
         )
 
         fino.to_netcdf(

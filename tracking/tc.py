@@ -228,12 +228,12 @@ def TC_tracking(CY_objects, t850, slp, Lon, Lat, times=None, nc_file=None):
         logger.debug(f"{Style.BRIGHT} Save TC objects into a NetCDF")
 
         ds_vars = {
-            "tc_objects": (["time", "y", "x"], TC_obj.astype(np.int16)),
-            "slp": (["time", "y", "x"], slp.astype(np.float32)),
-            "lat": (["y", "x"], Lat),
-            "lon": (["y", "x"], Lon),
+            "tc_objects": (["time", "latitude", "longitude"], TC_obj.astype(np.int16)),
+            "slp": (["time", "latitude", "longitude"], slp.astype(np.float32)),
         }
         coords = {"time": times.values} if times is not None else {}
+        coords["latitude"] = Lat[:, 0].squeeze()
+        coords["longitude"] = Lon[0, :].squeeze()
 
         fino = xr.Dataset(ds_vars, coords=coords)
 

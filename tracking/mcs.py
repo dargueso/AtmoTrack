@@ -279,15 +279,17 @@ def MCS_tracking(pr_data, bt_data, times, Lon, Lat, nc_file):
 
         fino = xr.Dataset(
             {
-                "MCS_objects": (["time", "y", "x"], objects_id_MCS),
-                "PR": (["time", "y", "x"], pr_data),
-                "PR_objects": (["time", "y", "x"], objects_id_pr),
-                "BT": (["time", "y", "x"], bt_data),
-                "BT_objects": (["time", "y", "x"], objects_id_bt),
-                "lat": (["y", "x"], Lat),
-                "lon": (["y", "x"], Lon),
+                "MCS_objects": (["time", "latitude", "longitude"], objects_id_MCS),
+                "PR": (["time", "latitude", "longitude"], pr_data),
+                "PR_objects": (["time", "latitude", "longitude"], objects_id_pr),
+                "BT": (["time", "latitude", "longitude"], bt_data),
+                "BT_objects": (["time", "latitude", "longitude"], objects_id_bt),
             },
-            coords={"time": times.values},
+            coords={
+                "time": times.values,
+                "latitude": Lat[:, 0].squeeze(),
+                "longitude": Lon[0, :].squeeze(),
+            },
         )
 
         fino.to_netcdf(
