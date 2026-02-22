@@ -118,7 +118,7 @@ def watershed_2d_overlap(
                 obj_t1 = np.delete(obj_t1, np.where(obj_t1 == ob_continue))
 
             for ob in range(len(obj_t1)):
-                ob_loc_new = ndimage.find_objects(labels[tt, :] == obj_t1[ob])
+                ob_loc_new = ndimage.find_objects((labels[tt, :] == obj_t1[ob]).astype(np.intp))
                 ob_new = objects_watershed[tt, :][ob_loc_new[0]]
                 ob_new[labels[tt, :][ob_loc_new[0]] == obj_t1[ob]] = ob_max
                 objects_watershed[tt, :][ob_loc_new[0]] = ob_new
