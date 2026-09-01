@@ -9,7 +9,7 @@
 # ---------------------------------------------------------------------------
 [general]
 # ---------------------------------------------------------------------------
-DT = 6          # data time step [hours]
+DT = 3          # data time step [hours]
 
 # ---------------------------------------------------------------------------
 [paths]
@@ -75,7 +75,7 @@ MaxDistCYFeatures    = 500000  # max distance between features to split [m]
 [cy_acy_slp]
 # Surface (SLP) Cyclone / Anticyclone tracking options
 # ---------------------------------------------------------------------------
-slp_smooth_low_anom  = -10        # cyclone anomaly threshold [hPa]
+slp_smooth_low_anom  = -5        # cyclone anomaly threshold [hPa]
 slp_smooth_high_anom = 12         # anticyclone anomaly threshold [hPa]
 MinTimeCY_SLP        = 12         # minimum cyclone lifetime [hours]
 MinTimeACY_SLP       = 12         # minimum anticyclone lifetime [hours]
