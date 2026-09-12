@@ -1,0 +1,61 @@
+# =============================================================================
+# settings.toml — DANA expert evaluation site
+#
+# Paths are relative to the expert_eval/ directory unless absolute.
+# =============================================================================
+
+[paths]
+cases_dir = "cases"                      # output of build_cases.py
+db_path   = "data/responses.sqlite"      # all expert answers
+secret_key_file = "data/secret_key"      # created automatically on first run
+
+[server]
+host = "0.0.0.0"
+port = 5050
+
+[session]
+default_cases  = 10
+size_options   = [10, 20, 30]
+extend_by      = 10
+min_pos_frac   = 0.4        # fraction of algorithm-COL cases per session (lower bound)
+max_pos_frac   = 0.6        # (upper bound)
+pos_borderline_frac = 0.4   # among COL cases, share of borderline ones
+neg_borderline_frac = 0.6   # among non-COL cases, share of borderline ones
+
+[sampling]
+prior_alpha     = 1.0       # Beta prior on per-case disagreement rate
+prior_beta      = 3.0
+unsure_weight   = 0.5       # an "unsure" answer counts as this much disagreement
+base_weight     = 0.5       # w = (base_weight + d) * novelty
+novelty_bonus   = 1.5
+novelty_min_answers = 3
+
+[build]
+n_cases        = 600        # new cases added per build run
+loop_hours     = 24         # frames shown before/after the central time
+min_gap_hours_same_event = 72
+min_gap_hours_any        = 12
+expand_box_deg = 5.0        # cyclones with z500 minimum in the COL box +/- this are "nearby"
+# pool composition (fractions of n_cases)
+quota_col_clear        = 0.25
+quota_col_borderline   = 0.25
+quota_nocol_clear      = 0.20
+quota_nocol_borderline = 0.30
+# borderline thresholds
+short_lived_extra_hours = 12   # COL life <= minimum COL duration + this -> "short_lived"
+onset_decay_hours      = 12
+marginal_ring_fraction = 0.95   # COL passes but ring fraction below this
+marginal_dz_extra_m    = 20     # COL passes but ring dz quantile below threshold + this
+fail_ring_fraction     = 0.80   # isolation fails but ring fraction at least this
+fail_dz_deficit_m      = 20     # isolation fails but ring dz quantile above threshold - this
+near_box_edge_deg      = 2.0
+near_box_outside_deg   = 3.0
+# rendering
+fig_width_in  = 8.0
+fig_height_in = 10.0
+dpi           = 90
+
+[review]
+reasons_false_alarm = ["Not a closed circulation", "Open trough", "Too weak", "Centre outside the box", "Other"]
+reasons_miss        = ["Clearly closed low", "Weak but closed", "Developing", "Decaying", "Other"]
+reasons_location    = ["Algorithm on a different lobe", "Centre offset", "Other"]
