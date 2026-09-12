@@ -1,0 +1,7 @@
+# Normalize line endings to LF for all text files, regardless of local
+# core.autocrlf settings, so checkouts are consistent across machines
+# (e.g. GitHub Desktop on Windows/Mac showing phantom diffs on .sh files).
+* text=auto eol=lf
+
+*.sh text eol=lf
+*.py text eol=lf
