@@ -8,7 +8,11 @@ Environment overrides (handy for tests or a second deployment):
 
 import os
 import pathlib
-import tomllib
+
+try:
+    import tomllib  # Python 3.11+
+except ImportError:  # Python 3.9 / 3.10: pip install tomli
+    import tomli as tomllib
 
 HERE = pathlib.Path(__file__).resolve().parent
 _ENV = {"cases_dir": "EXPERT_EVAL_CASES_DIR", "db_path": "EXPERT_EVAL_DB"}

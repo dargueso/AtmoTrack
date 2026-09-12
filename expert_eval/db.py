@@ -94,7 +94,8 @@ GROUP BY c.case_id;
 
 
 def now():
-    return dt.datetime.now(dt.UTC).isoformat(timespec="seconds")
+    # timezone.utc rather than dt.UTC so the server also runs on Python < 3.11
+    return dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")  # noqa: UP017
 
 
 def connect(path):

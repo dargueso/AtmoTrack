@@ -50,7 +50,7 @@ tags, and keeps cases from the same event at least 72 h apart.
 ## 2. Run the site
 
 ```bash
-pip install -r requirements.txt           # flask
+pip install -r requirements.txt           # flask (+ tomli on Python < 3.11); Python >= 3.9
 python admin.py add-codes --n 5 --label AEMET
 python app.py                             # http://<host>:5050
 ```
