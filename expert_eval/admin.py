@@ -66,11 +66,15 @@ def cmd_add_codes(args):
 
 
 def cmd_list_codes(_args):
-    rows = con().execute(
-        """SELECT i.code, i.label, i.created_at, i.expert_id,
+    rows = (
+        con()
+        .execute(
+            """SELECT i.code, i.label, i.created_at, i.expert_id,
                   (SELECT COUNT(*) FROM responses r WHERE r.expert_id = i.expert_id) AS n
            FROM invite_codes i ORDER BY i.created_at"""
-    ).fetchall()
+        )
+        .fetchall()
+    )
     print(f"{'code':10s} {'label':20s} {'used':5s} answers")
     for r in rows:
         used = "yes" if r["expert_id"] else "no"
@@ -174,7 +178,9 @@ def tuning_rows(c, cases_dir):
             )
             if not (cy["is_col"] or near_box or cy["id"] in near_ids):
                 continue
-            expert_dana = int(cy["id"] in matched_cols or (not cy["is_col"] and cy["id"] in near_ids))
+            expert_dana = int(
+                cy["id"] in matched_cols or (not cy["is_col"] and cy["id"] in near_ids)
+            )
             rows.append(
                 {
                     **base,
@@ -187,8 +193,10 @@ def tuning_rows(c, cases_dir):
                 }
             )
         for d in clicks:
-            if d["matched_col_id"] is None and d["duplicate_of_col"] is None and (
-                (d["nearest_cyclone"] or {}).get("no_cyclone_object")
+            if (
+                d["matched_col_id"] is None
+                and d["duplicate_of_col"] is None
+                and ((d["nearest_cyclone"] or {}).get("no_cyclone_object"))
             ):
                 dd = diag.get(r["id"], {}).get(d["idx"]) or {}
                 iso = dd.get("isolation") or {}
@@ -248,7 +256,7 @@ def _dist(vals):
         return "n=0"
     vals.sort()
     q = lambda p: vals[min(len(vals) - 1, int(p * (len(vals) - 1) + 0.5))]  # noqa: E731
-    return f"n={len(vals):4d}  p10={q(.1):8.2f}  median={statistics.median(vals):8.2f}  p90={q(.9):8.2f}"
+    return f"n={len(vals):4d}  p10={q(0.1):8.2f}  median={statistics.median(vals):8.2f}  p90={q(0.9):8.2f}"
 
 
 def cmd_report(args):
@@ -259,7 +267,9 @@ def cmd_report(args):
         return
     n_exp = c.execute("SELECT COUNT(*) FROM experts").fetchone()[0]
     n_ses = c.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
-    print(f"# DANA expert evaluation report\n\nexperts={n_exp} sessions={n_ses} responses={len(rows)}")
+    print(
+        f"# DANA expert evaluation report\n\nexperts={n_exp} sessions={n_ses} responses={len(rows)}"
+    )
     oc = Counter(r["outcome"] for r in rows)
     print("\n## Outcomes (expert = reference)")
     for k, v in oc.most_common():
@@ -361,7 +371,9 @@ def cmd_report(args):
     if same_parent:
         sp = sum(1 for s, _ in same_parent if s)
         print(f"mismatched clicks inside the COL's parent cyclone object: {sp}/{len(same_parent)}")
-        print(f"mismatched clicks, distance to nearest COL cell: {_dist([m for _, m in same_parent])}")
+        print(
+            f"mismatched clicks, distance to nearest COL cell: {_dist([m for _, m in same_parent])}"
+        )
 
     # expert reviews
     rv = Counter()
@@ -411,9 +423,7 @@ def cmd_sweep(args):
     m = manifest()
     p = m.get("col_params") or {}
     rows = [
-        r
-        for r in tuning_rows(c, S["paths"]["cases_dir"])
-        if args.include_unsure or not r["unsure"]
+        r for r in tuning_rows(c, S["paths"]["cases_dir"]) if args.include_unsure or not r["unsure"]
     ]
     if not rows:
         print("No labelled rows yet.")
@@ -437,7 +447,9 @@ def cmd_sweep(args):
         life = _num(r.get("col_duration_value")) or 0
         cy_life = _num(r.get("cy_life_steps")) or 0
         steps = dur_h / dt_h
-        if r.get("isolation_pass") == 0:  # would-be COL under new thresholds: best case = cyclone life
+        if (
+            r.get("isolation_pass") == 0
+        ):  # would-be COL under new thresholds: best case = cyclone life
             life = cy_life
         return int(life >= steps and cy_life >= steps)
 
@@ -459,21 +471,31 @@ def cmd_sweep(args):
     cur = (p.get("col_percent_isolation"), p.get("col_thres_isolation"), p.get("col_min_dur"))
     print(f"rows={len(rows)} (unsure {'included' if args.include_unsure else 'excluded'}); "
           f"current thresholds pct={cur[0]} dz={cur[1]} m min_dur={cur[2]} h (DT={dt_h})")  # fmt: skip
-    print("NOTE: duration is approximated from stored lifetimes; treat as a hint, then re-run tracking.")
-    print(f"{'pct':>5s} {'dz_m':>5s} {'dur_h':>5s} {'CSI':>6s} {'POD':>6s} {'FAR':>6s} {'hit':>5s} {'miss':>5s} {'fa':>5s} {'cn':>6s}")
+    print(
+        "NOTE: duration is approximated from stored lifetimes; treat as a hint, then re-run tracking."
+    )
+    print(
+        f"{'pct':>5s} {'dz_m':>5s} {'dur_h':>5s} {'CSI':>6s} {'POD':>6s} {'FAR':>6s} {'hit':>5s} {'miss':>5s} {'fa':>5s} {'cn':>6s}"
+    )
     for res in sorted(results, reverse=True)[: args.top]:
         csi, pod, far, hit, miss, fa, cn, pct, thr, dur = res
         mark = "  <- current" if (pct, thr, dur) == cur else ""
-        print(f"{pct:5.2f} {thr:5d} {dur:5.0f} {csi:6.3f} {pod:6.3f} {far:6.3f} {hit:5d} {miss:5d} {fa:5d} {cn:6d}{mark}")
+        print(
+            f"{pct:5.2f} {thr:5d} {dur:5.0f} {csi:6.3f} {pod:6.3f} {far:6.3f} {hit:5d} {miss:5d} {fa:5d} {cn:6d}{mark}"
+        )
     for res in results:
         if (res[7], res[8], res[9]) == cur:
             csi, pod, far, hit, miss, fa, cn, pct, thr, dur = res
-            print(f"current: CSI={csi:.3f} POD={pod:.3f} FAR={far:.3f} hit={hit} miss={miss} fa={fa} cn={cn}")
+            print(
+                f"current: CSI={csi:.3f} POD={pod:.3f} FAR={far:.3f} hit={hit} miss={miss} fa={fa} cn={cn}"
+            )
 
 
 # ---------------------------------------------------------------------------
 def main():
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     sub = ap.add_subparsers(dest="cmd", required=True)
     a = sub.add_parser("add-codes", help="create invite codes")
     a.add_argument("--n", type=int, default=1)
@@ -492,7 +514,9 @@ def main():
     a.set_defaults(func=cmd_report)
     a = sub.add_parser("sweep", help="isolation threshold sweep against expert labels")
     a.add_argument("--include-unsure", action="store_true")
-    a.add_argument("--durations", type=float, nargs="*", default=[], help="extra col_min_dur values [h]")
+    a.add_argument(
+        "--durations", type=float, nargs="*", default=[], help="extra col_min_dur values [h]"
+    )
     a.add_argument("--top", type=int, default=15)
     a.set_defaults(func=cmd_sweep)
     args = ap.parse_args()

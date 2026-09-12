@@ -210,7 +210,9 @@ def evaluate_answer(case, has_dana, clicks):
         # nearest tracked cyclone (inside, or nearest mask cell within NEAR_CYCLONE_KM)
         best = None
         for cy in case.cyclones:
-            dkm = 0.0 if det["inside_cy_id"] == cy["id"] else case.nearest_cell_km("cy", cy, lat, lon)
+            dkm = (
+                0.0 if det["inside_cy_id"] == cy["id"] else case.nearest_cell_km("cy", cy, lat, lon)
+            )
             if dkm <= NEAR_CYCLONE_KM and (best is None or dkm < best[0]):
                 best = (dkm, cy)
         if best is not None:

@@ -230,16 +230,22 @@ def test_api_flow(client):
                                         "frames_viewed": [0, 6], "response_ms": 1234, **body})  # fmt: skip
         assert r.status_code == 200, r.get_json()
     # duplicate answer is rejected
-    dup = c.post("/api/answer", json={"session_id": sid, "case_id": cases[0]["case_id"], "has_dana": False})
+    dup = c.post(
+        "/api/answer", json={"session_id": sid, "case_id": cases[0]["case_id"], "has_dana": False}
+    )
     assert dup.status_code == 409
     # yes without clicks is rejected
-    r = c.post("/api/answer", json={"session_id": sid, "case_id": cases[8]["case_id"], "has_dana": True})
+    r = c.post(
+        "/api/answer", json={"session_id": sid, "case_id": cases[8]["case_id"], "has_dana": True}
+    )
     assert r.status_code == 400
 
     summ = c.post(f"/api/session/{sid}/end", json={}).get_json()
     assert summ["end_reason"] == "ended_early" and summ["n_answered"] == 7
     con = app_module.db.connect(os.environ["EXPERT_EVAL_DB"])
-    got = {r["case_id"]: r["outcome"] for r in con.execute("SELECT case_id, outcome FROM responses")}
+    got = {
+        r["case_id"]: r["outcome"] for r in con.execute("SELECT case_id, outcome FROM responses")
+    }
     assert got == expected
     agree = sum(o in ("agree_hit", "agree_null") for o in expected.values())
     assert summ["agree_maps"] == agree
@@ -260,7 +266,9 @@ def test_api_flow(client):
     assert more["offset"] == 10 and not answered & {x["case_id"] for x in more["cases"]}
 
     # invite code login is independent of profile
-    con.execute("INSERT INTO invite_codes (code, label, created_at) VALUES ('ABCD-EFGH', 'Lab-1', 'now')")
+    con.execute(
+        "INSERT INTO invite_codes (code, label, created_at) VALUES ('ABCD-EFGH', 'Lab-1', 'now')"
+    )
     con.commit()
     c.post("/api/logout", json={})
     r = c.post("/api/login", json={"code": "abcd-efgh"}).get_json()

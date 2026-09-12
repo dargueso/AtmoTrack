@@ -147,9 +147,11 @@ def frame(fid):
 @app.get("/api/overlay/<case_id>.png")
 def overlay(case_id):
     ex = require_expert()
-    ok = get_db().execute(
-        "SELECT 1 FROM responses WHERE expert_id = ? AND case_id = ?", (ex["id"], case_id)
-    ).fetchone()
+    ok = (
+        get_db()
+        .execute("SELECT 1 FROM responses WHERE expert_id = ? AND case_id = ?", (ex["id"], case_id))
+        .fetchone()
+    )
     if not ok:
         abort(403)
     return send_from_directory(CASES_DIR / "overlays", f"{case_id}.png")
@@ -203,7 +205,9 @@ def login():
         email = (b.get("email") or "").strip().lower()
         experience = (b.get("experience") or "").strip()
         if not name or not EMAIL_RE.match(email) or experience not in EXPERIENCE:
-            return jsonify({"error": "Please give your name, a valid email and your experience"}), 400
+            return jsonify(
+                {"error": "Please give your name, a valid email and your experience"}
+            ), 400
         row = con.execute("SELECT id FROM experts WHERE email = ?", (email,)).fetchone()
         if row:
             eid = row["id"]
@@ -277,7 +281,9 @@ def new_session():
     n = max(1, min(n, 100))
     case_ids, n_pos = _draw(ex, n)
     if not case_ids:
-        return jsonify({"error": "You have already answered every case in the pool. Thank you!"}), 409
+        return jsonify(
+            {"error": "You have already answered every case in the pool. Thank you!"}
+        ), 409
     algo_version = json.dumps({"git_hash": m.get("git_hash"), "col_params": m.get("col_params")})
     con = get_db()
     sid = con.execute(
@@ -350,7 +356,9 @@ def answer():
     except db.sqlite3.IntegrityError:
         return jsonify({"error": "This case was already answered"}), 409
     con.commit()
-    n_done = con.execute("SELECT COUNT(*) FROM responses WHERE session_id = ?", (row["id"],)).fetchone()[0]
+    n_done = con.execute(
+        "SELECT COUNT(*) FROM responses WHERE session_id = ?", (row["id"],)
+    ).fetchone()[0]
     return jsonify({"ok": True, "n_answered": n_done, "n_total": len(order)})
 
 
@@ -403,8 +411,9 @@ def summary(sid, ex):
                 "frame": f"/frames/{c['frames'][c['center_index']]}.png" if c else None,
                 "overlay": f"/api/overlay/{r['case_id']}.png",
                 "clicks": json.loads(r["clicks"]),
-                "click_matched": [d["matched_col_id"] is not None
-                                  for d in json.loads(r["click_details"])],  # fmt: skip
+                "click_matched": [
+                    d["matched_col_id"] is not None for d in json.loads(r["click_details"])
+                ],  # fmt: skip
                 "unsure": bool(r["unsure"]),
                 "n_matched": r["n_matched"],
                 "n_algo_missed": r["n_algo_missed"],
@@ -412,9 +421,13 @@ def summary(sid, ex):
                 "algo_n_cols": r["algo_n_cols"],
                 "reason_options": _reasons_for(r["outcome"]),
                 "review": (
-                    {"changed": r["changed"], "reasons": json.loads(r["reasons"] or "[]"),
-                     "comment": r["comment"]}
-                    if r["reasons"] is not None else None
+                    {
+                        "changed": r["changed"],
+                        "reasons": json.loads(r["reasons"] or "[]"),
+                        "comment": r["comment"],
+                    }
+                    if r["reasons"] is not None
+                    else None
                 ),  # fmt: skip
             }
         )
@@ -450,7 +463,9 @@ def end_session(sid):
     ex = require_expert()
     row = _own_session(sid, ex)
     con = get_db()
-    n_done = con.execute("SELECT COUNT(*) FROM responses WHERE session_id = ?", (sid,)).fetchone()[0]
+    n_done = con.execute("SELECT COUNT(*) FROM responses WHERE session_id = ?", (sid,)).fetchone()[
+        0
+    ]
     reason = "completed" if n_done >= len(json.loads(row["case_order"])) else "ended_early"
     con.execute(
         "UPDATE sessions SET ended_at = ?, end_reason = ? WHERE id = ?", (db.now(), reason, sid)

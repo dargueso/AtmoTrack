@@ -146,10 +146,14 @@ def eastward_flow_metrics(u_reg, lat_c, ila, ilo):
     if col.shape[0] == 0:
         return _crit(False, value=None, threshold=0.0, n_points=0, note="upper boundary")
     umin = float(np.min(col))
-    return _crit(not (umin > 0), value=umin, threshold=0.0, margin=-umin, n_points=int(col.shape[0]))
+    return _crit(
+        not (umin > 0), value=umin, threshold=0.0, margin=-umin, n_points=int(col.shape[0])
+    )
 
 
-def col_step_criteria(obj2d, z2d, u2d, lat2d, lon2d, crop, full_shape, cy_life_steps, p, gs, area2d):
+def col_step_criteria(
+    obj2d, z2d, u2d, lat2d, lon2d, crop, full_shape, cy_life_steps, p, gs, area2d
+):
     """Evaluate the COL step criteria for one cyclone object at one time step.
 
     Parameters

@@ -28,7 +28,9 @@ from settings import load_settings  # noqa: E402
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("--all", action="store_true", help="recompute already processed clicks")
     ap.add_argument("--search-km", type=float, default=300.0)
     args = ap.parse_args()

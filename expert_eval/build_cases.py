@@ -393,7 +393,9 @@ def select_cases(candidates, n_new, B, existing, rng):
             keys = POS_BORDER_TAGS if cat.startswith("col") else NEG_BORDER_TAGS
             buckets = {k: [c for c in pool if k in c["tags"]] for k in keys}
         else:
-            buckets = {s: [c for c in pool if c["season"] == s] for s in ("DJF", "MAM", "JJA", "SON")}
+            buckets = {
+                s: [c for c in pool if c["season"] == s] for s in ("DJF", "MAM", "JJA", "SON")
+            }
         for b in buckets.values():
             rng.shuffle(b)
         buckets = {k: v for k, v in buckets.items() if v}
@@ -573,8 +575,12 @@ def build_year_cases(year, path, cases, scan, params, S, cases_dir, no_loop):
                         "zmin_lat": rec["zmin_lat"],
                         "zmin_lon": rec["zmin_lon"],
                         "col_life": (
-                            {"first": times[life[0]].isoformat(), "last": times[life[1]].isoformat()}
-                            if life else None
+                            {
+                                "first": times[life[0]].isoformat(),
+                                "last": times[life[1]].isoformat(),
+                            }
+                            if life
+                            else None
                         ),  # fmt: skip
                         "record": {k: v for k, v in rec.items() if k not in ("t",)},
                     }
@@ -621,8 +627,12 @@ def build_year_cases(year, path, cases, scan, params, S, cases_dir, no_loop):
 
 # ---------------------------------------------------------------------------
 def main():
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--years", type=int, nargs="*", help="years to use (default: all finished files)")
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    ap.add_argument(
+        "--years", type=int, nargs="*", help="years to use (default: all finished files)"
+    )
     ap.add_argument("--n-cases", type=int, default=None, help="number of NEW cases to add")
     ap.add_argument("--jobs", type=int, default=8)
     ap.add_argument("--seed", type=int, default=None)
