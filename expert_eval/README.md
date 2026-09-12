@@ -77,16 +77,22 @@ more often (`settings.toml [sampling]`). Cases with few answers get a novelty bo
 
 ## 3. Analyse
 
+All answers are stored in `data/responses.sqlite` on the machine that runs `app.py`. Run the
+analysis commands from `expert_eval/` on that machine (they are safe to run while the site is up).
+Keep a single running copy of the site, otherwise answers end up split across databases.
+
 ```bash
-python enrich_responses.py                # criteria around each click (from stored fields)
-python admin.py report                    # outcomes, disagreement by class/tag/season/expert,
-                                          # failed criteria for misses, margins of false alarms,
-                                          # location offsets, reviews, most disputed cases
+python enrich_responses.py                # optional: criteria around each click (needs numpy, scipy)
+python admin.py report                    # disagreement analysis printed to the terminal
 python admin.py export responses.csv      # one row per answer
 python admin.py export-tuning tuning.csv  # one row per (answer, cyclone object) with all criteria
-                                          # values/margins + expert label; agreements included
-python admin.py sweep                     # isolation threshold grid vs expert labels (CSI/POD/FAR)
+python admin.py sweep                     # isolation threshold grid vs expert labels
+python admin.py list-codes                # invite codes, whether used, answers per code
 ```
+
+Results only become meaningful once each case has several answers: a case answered once has a
+disagreement rate of 0 % or 100 %. `report --min-answers N` controls how many answers a case needs
+to appear in the "most disputed" list.
 
 Outcomes, with the expert as reference:
 
@@ -105,6 +111,103 @@ Stored per answer (`responses.click_details`, `responses.algo_details`):
 - **misses:** the nearest tracked cyclone within 300 km with its full criteria record (`first_failed_criterion`, values and margins), or `no_cyclone_object`
 - **false alarms and hits:** the COL's criteria record, area, lifetime and position in its lifecycle
 - **sessions:** the COL thresholds and git hash of the build (`sessions.algo_version`)
+
+## 4. Interpreting the results
+
+### `admin.py report`
+
+The report prints these sections, in order:
+
+| section | what it shows | how to read it |
+|---|---|---|
+| **Outcomes** | count and share of each outcome over all answers | overall agreement is `agree_hit` + `agree_null` |
+| **Disagreement by case category / tag / season / expert experience / expert** | `n` answers, % disagreement, % unsure per group | high disagreement *and* low unsure on a tag points to a systematic algorithm issue (e.g. `marginal_isolation`, `onset`). High unsure means experts find the situation genuinely ambiguous. One expert far from the rest may interpret the task differently |
+| **Expert systems the algorithm did not detect** | for every expert click not matched to an algorithm COL: the first failed criterion of the nearest tracked z500 cyclone (within 300 km), how often each criterion failed, and how many had no tracked cyclone at all | the criterion that fails most often is the first candidate for relaxing. `(nearest object is a COL: location offset)` means the algorithm found the system but the click fell outside its area. `no tracked z500 cyclone` points at the cyclone detection step (`[cy_acy_z500]`), not the COL criteria. `col_duration` often fails as a *consequence* of other failures, so look at the first failed criterion |
+| **Algorithm COLs: false alarms vs hits** | p10 / median / p90 of isolation margin, Δz margin (m), box margin (deg), poleward u200, z500 minimum (dam), area, COL lifetime and hours since onset / to decay, for COLs experts rejected (FA, maps answered "no") and COLs they confirmed (HIT) | where the FA distribution sits clearly below the HIT one (e.g. small isolation margins, short lifetimes, early onset), tightening that criterion should remove false alarms while keeping hits |
+| **Location** | distance from expert clicks to the algorithm's z500 minimum for matched and mismatched clicks, the share of mismatched clicks inside the COL's parent cyclone, and the distance to the nearest COL grid cell | mismatched clicks inside the parent cyclone, or within a few hundred km of the COL area, suggest the COL area is too small or the centre is placed on a different lobe, rather than a wrong detection |
+| **Post-session reviews** | per outcome: how many experts kept or would change their answer, and the reasons they picked | "would change" answers are weaker evidence against the algorithm. Frequent reasons (e.g. *Open trough* for false alarms) suggest which criterion to revisit |
+| **Most disputed cases** | case id and time, category, answers, disagreement %, outcome breakdown and tags | case ids are timestamps (`YYYYMMDDHH`). Look at them with `Plotting/plot_z500_t850_DANAS.py` or the frames in `cases/frames/` |
+
+### `export responses.csv`
+
+One row per answer: expert (label, experience, affiliation), case (id, time, category, tags,
+number of algorithm COLs), the answer (`has_dana`, `unsure`, `clicks` as lon/lat JSON), `outcome`,
+system counts (`n_systems`, `n_matched`, `n_algo_missed`, `n_algo_extra`), `frames_viewed`
+(hours relative to T+0), `response_ms`, the post-session review and `algo_version`.
+
+### `export-tuning tuning.csv`
+
+The table for tuning thresholds. Agreements are included, so it also shows which decisions to keep.
+
+| column | meaning |
+|---|---|
+| `kind` | `cyclone_object`: a tracked z500 cyclone at the case time (a COL, near the box, or nearest to an expert click). `expert_click_no_cyclone`: an expert DANA with no tracked cyclone nearby (criteria filled in by `enrich_responses.py`) |
+| `expert_dana` | 1 if the expert marked this system as a DANA (a click inside the COL, or an unmatched click within 300 km of this cyclone) |
+| `algo_col` | 1 if the algorithm flagged it as a COL |
+| `agree` | `expert_dana == algo_col` |
+| `<criterion>_pass`, `<criterion>_value`, `<criterion>_margin` | for `cy_duration`, `latitude`, `pole`, `object_bounds`, `isolation`, `eastward_flow`, `z500_threshold`, `region`, `border`, `col_duration`. The margin is the distance to the threshold (negative = failed) |
+| `isolation_dz_at_required_fraction`, `isolation_dz_margin`, `isolation_dz_median`, `isolation_dz_min`, `isolation_dz_q00` … `isolation_dz_q50` | Δz (m) between the ring and the centre. `dz_qXX` is the XX % quantile over ring points, so isolation passes when `dz_q{100·(1 − col_percent_isolation)}` > `col_thres_isolation` |
+| `first_failed_criterion`, `failed_criteria` | in `col.py` order, pipe-separated |
+| `zmin_lat`, `zmin_lon`, `zmin_dam`, `area_km2`, `cy_life_steps`, `step_in_cy_life` | descriptors of the system |
+| `unsure`, `review_changed`, `experience`, `category`, `tags`, `outcome` | for filtering or weighting |
+
+Example:
+
+```python
+import pandas as pd
+
+df = pd.read_csv("tuning.csv")
+obj = df[(df.kind == "cyclone_object") & (df.unsure == 0)]
+# how isolation differs between expert-confirmed and rejected systems
+print(
+    obj.groupby(["expert_dana", "algo_col"])[["isolation_value", "isolation_dz_margin"]].describe()
+)
+# which criteria reject systems experts consider DANAs
+print(obj[(obj.expert_dana == 1) & (obj.algo_col == 0)].first_failed_criterion.value_counts())
+```
+
+### `sweep`
+
+Re-scores the stored criteria against the expert labels (`tuning.csv` rows) for a grid of
+`col_percent_isolation` (0.60–0.95) × `col_thres_isolation` (20–140 m), at the current
+`col_min_dur` plus any extra `--durations`. Unsure answers are excluded unless `--include-unsure`.
+Rows are sorted by CSI and the current setting is marked.
+
+| column | meaning |
+|---|---|
+| `hit` / `miss` / `fa` / `cn` | expert DANA detected / expert DANA not detected / algorithm COL rejected by the expert / both say no |
+| `CSI` | hit / (hit + miss + fa): overall skill, 1 is perfect |
+| `POD` | hit / (hit + miss): share of expert DANAs detected |
+| `FAR` | fa / (hit + fa): share of algorithm COLs experts reject |
+
+Expert DANAs with no tracked cyclone always count as misses, whatever the thresholds. All other
+criteria keep their stored pass/fail, and duration is only approximated from stored lifetimes.
+Use the sweep as a hint: change `config.toml`, re-run the tracking and rebuild the case pool (see
+section 1) to confirm.
+
+### `enrich_responses.py`
+
+For every expert click, finds the lowest z500 point within 300 km and evaluates ring isolation,
+poleward u200 and box membership there, using the fields saved in `cases/eval/fields/`. Results go
+to the `click_diagnostics` table and feed the `expert_click_no_cyclone` rows of `tuning.csv`. Run it
+before `report` / `export-tuning`. Only new clicks are processed; `--all` recomputes everything.
+Needs numpy and scipy (`pip install numpy scipy`).
+
+### Direct database access
+
+```bash
+sqlite3 data/responses.sqlite
+```
+
+```sql
+-- answers and disagreement rate per case (sampler uses the same view)
+SELECT * FROM case_agreement WHERE n > 0 ORDER BY disagree_rate DESC, n DESC LIMIT 20;
+-- outcomes per expert
+SELECT expert_id, outcome, COUNT(*) FROM responses GROUP BY expert_id, outcome;
+```
+
+Tables: `experts`, `invite_codes`, `sessions`, `responses` (`click_details` and `algo_details`
+are JSON), `reviews`, `click_diagnostics`, `cases`.
 
 ## Tests
 
