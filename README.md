@@ -226,8 +226,8 @@ algorithms, split by concern:
 Import directly from the package or from the backward-compatible shim:
 
 ```python
-from tracking import COL_tracking, CY_ACY_z500_tracking   # preferred
-from tracking_functions import COL_tracking                 # also works
+from tracking import COL_tracking, CY_ACY_z500_tracking  # preferred
+from tracking_functions import COL_tracking  # also works
 ```
 
 `utils.py` provides the shared logger and TTY-aware ANSI colour helpers.
