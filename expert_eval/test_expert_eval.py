@@ -180,39 +180,88 @@ def test_sampler_prefers_disputed_cases():
 # ---------------------------------------------------------------------------
 # API flow on a real (small) case pool
 # ---------------------------------------------------------------------------
-@pytest.fixture()
-def client(tmp_path, monkeypatch):
+def cases_dir_or_skip():
     cases_dir = os.environ.get("EXPERT_EVAL_CASES_DIR")
     if not cases_dir or not (pathlib.Path(cases_dir) / "manifest.json").exists():
         pytest.skip("set EXPERT_EVAL_CASES_DIR to a built case pool")
-    monkeypatch.setenv("EXPERT_EVAL_DB", str(tmp_path / "test.sqlite"))
+    return pathlib.Path(cases_dir)
+
+
+class FlaskClient:
+    """Adapter so the same API flow runs against Flask and the PHP server (test_php_backend.py)."""
+
+    def __init__(self, test_client, db_path, eval_dir):
+        self.c, self.db_path, self.eval_dir = test_client, db_path, eval_dir
+
+    def post(self, path, payload=None):
+        r = self.c.post("/" + path, json=payload if payload is not None else {})
+        return r.status_code, r.get_json(silent=True)
+
+    def get(self, path):
+        r = self.c.get("/" + path)
+        return r.status_code, r.data
+
+    def get_json(self, path):
+        return json.loads(self.get(path)[1])
+
+    def query(self, sql, params=()):
+        import sqlite3
+
+        con = sqlite3.connect(self.db_path)
+        con.row_factory = sqlite3.Row
+        try:
+            return [dict(r) for r in con.execute(sql, params)]
+        finally:
+            con.close()
+
+    def execute(self, sql, params=()):
+        import sqlite3
+
+        con = sqlite3.connect(self.db_path)
+        try:
+            con.execute(sql, params)
+            con.commit()
+        finally:
+            con.close()
+
+
+@pytest.fixture()
+def client(tmp_path, monkeypatch):
+    cases_dir = cases_dir_or_skip()
+    db_path = tmp_path / "test.sqlite"
+    monkeypatch.setenv("EXPERT_EVAL_DB", str(db_path))
     import app as app_module
 
     app_module = importlib.reload(app_module)
     app_module.app.config["TESTING"] = True
     with app_module.app.test_client() as c:
-        yield c, app_module
+        yield FlaskClient(c, db_path, cases_dir / "eval")
 
 
 def test_api_flow(client):
-    c, app_module = client
-    assert c.post("/api/session", json={"n_cases": 10}).status_code == 401
-    r = c.post("/api/login", json={"name": "Test", "email": "bad"})
-    assert r.status_code == 400
-    r = c.post("/api/login", json={"name": "Test Expert", "email": "T@example.org",
-                                   "experience": "Researcher"})  # fmt: skip
-    assert r.status_code == 200
-    cfg = c.get("/api/config").get_json()
-    assert cfg["expert"]["label"] == "Test Expert"
+    api_flow(client)
 
-    s = c.post("/api/session", json={"n_cases": 10}).get_json()
+
+def api_flow(c):
+    """Full expert flow. c provides post(path, payload) -> (status, json), get(path) -> (status, bytes),
+    get_json(path), query(sql) -> list of dicts, execute(sql) and eval_dir."""
+
+    assert c.post("api/session", {"n_cases": 10})[0] == 401
+    assert c.post("api/login", {"name": "Test", "email": "bad"})[0] == 400
+    status, r = c.post(
+        "api/login", {"name": "Test Expert", "email": "T@example.org", "experience": "Researcher"}
+    )
+    assert status == 200
+    assert c.get_json("api/config")["expert"]["label"] == "Test Expert"
+
+    s = c.post("api/session", {"n_cases": 10})[1]
     sid, cases = s["session_id"], s["cases"]
     assert len(cases) == 10
-    frame = c.get(cases[0]["frames"][cases[0]["center_index"]])
-    assert frame.status_code == 200 and frame.data[:4] == b"\x89PNG"
-    assert c.get(f"/api/overlay/{cases[0]['case_id']}.png").status_code == 403
+    status, data = c.get(cases[0]["frames"][cases[0]["center_index"]])
+    assert status == 200 and data[:4] == b"\x89PNG"
+    assert c.get(f"api/overlay/{cases[0]['case_id']}.png")[0] == 403
 
-    eval_dir = app_module.EVAL_DIR
+    eval_dir = c.eval_dir
     expected = {}
     for i, case in enumerate(cases[:7]):
         ev = json.loads((eval_dir / f"{case['case_id']}.json").read_text())
@@ -226,51 +275,49 @@ def test_api_flow(client):
         else:
             body = {"has_dana": False, "clicks": []}
             expected[case["case_id"]] = "algo_false_alarm" if ev["cols"] else "agree_null"
-        r = c.post("/api/answer", json={"session_id": sid, "case_id": case["case_id"], "unsure": i == 3,
-                                        "frames_viewed": [0, 6], "response_ms": 1234, **body})  # fmt: skip
-        assert r.status_code == 200, r.get_json()
+        status, r = c.post("api/answer", {"session_id": sid, "case_id": case["case_id"], "unsure": i == 3,
+                                          "frames_viewed": [0, 6], "response_ms": 1234, **body})  # fmt: skip
+        assert status == 200, r
     # duplicate answer is rejected
     dup = c.post(
-        "/api/answer", json={"session_id": sid, "case_id": cases[0]["case_id"], "has_dana": False}
+        "api/answer", {"session_id": sid, "case_id": cases[0]["case_id"], "has_dana": False}
     )
-    assert dup.status_code == 409
+    assert dup[0] == 409
     # yes without clicks is rejected
-    r = c.post(
-        "/api/answer", json={"session_id": sid, "case_id": cases[8]["case_id"], "has_dana": True}
-    )
-    assert r.status_code == 400
+    r = c.post("api/answer", {"session_id": sid, "case_id": cases[8]["case_id"], "has_dana": True})
+    assert r[0] == 400
 
-    summ = c.post(f"/api/session/{sid}/end", json={}).get_json()
+    summ = c.post(f"api/session/{sid}/end", {})[1]
     assert summ["end_reason"] == "ended_early" and summ["n_answered"] == 7
-    con = app_module.db.connect(os.environ["EXPERT_EVAL_DB"])
-    got = {
-        r["case_id"]: r["outcome"] for r in con.execute("SELECT case_id, outcome FROM responses")
-    }
+    got = {r["case_id"]: r["outcome"] for r in c.query("SELECT case_id, outcome FROM responses")}
     assert got == expected
     agree = sum(o in ("agree_hit", "agree_null") for o in expected.values())
     assert summ["agree_maps"] == agree
     assert len(summ["disagreements"]) == 7 - agree
     assert summ["n_unsure"] == 1
 
-    assert c.get(f"/api/overlay/{cases[0]['case_id']}.png").status_code == 200
+    assert c.get(f"api/overlay/{cases[0]['case_id']}.png")[0] == 200
     if summ["disagreements"]:
         d = summ["disagreements"][0]
-        r = c.post("/api/review", json={"response_id": d["response_id"], "changed": False,
-                                        "reasons": d["reason_options"][:1] + ["not allowed"], "comment": "hm"})  # fmt: skip
-        assert r.status_code == 200
-        rv = con.execute("SELECT * FROM reviews").fetchone()
-        assert json.loads(rv["reasons"]) == d["reason_options"][:1] and rv["changed"] == 0
+        for comment in ("first", "updated"):  # second save updates the same review
+            status, _ = c.post("api/review", {"response_id": d["response_id"], "changed": False,
+                                              "reasons": d["reason_options"][:1] + ["not allowed"],
+                                              "comment": comment})  # fmt: skip
+            assert status == 200
+        rv = c.query("SELECT * FROM reviews")
+        assert len(rv) == 1 and rv[0]["comment"] == "updated"
+        assert json.loads(rv[0]["reasons"]) == d["reason_options"][:1] and rv[0]["changed"] == 0
 
-    more = c.post(f"/api/session/{sid}/extend", json={"n_cases": 5}).get_json()
+    more = c.post(f"api/session/{sid}/extend", {"n_cases": 5})[1]
     answered = set(expected)
     assert more["offset"] == 10 and not answered & {x["case_id"] for x in more["cases"]}
 
     # invite code login is independent of profile
-    con.execute(
+    c.execute(
         "INSERT INTO invite_codes (code, label, created_at) VALUES ('ABCD-EFGH', 'Lab-1', 'now')"
     )
-    con.commit()
-    c.post("/api/logout", json={})
-    r = c.post("/api/login", json={"code": "abcd-efgh"}).get_json()
+    c.post("api/logout", {})
+    assert c.post("api/session", {"n_cases": 10})[0] == 401
+    r = c.post("api/login", {"code": "abcd-efgh"})[1]
     assert r["expert"]["label"] == "Lab-1" and r["expert"]["auth"] == "code"
     assert math.isfinite(summ["all_experts"]["agreement_rate"])

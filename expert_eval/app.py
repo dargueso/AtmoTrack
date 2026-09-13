@@ -241,7 +241,7 @@ def _case_payload(m, cid):
     return {
         "case_id": cid,
         "month": c["month"],
-        "frames": [f"/frames/{f}.png" for f in c["frames"]],
+        "frames": [f"frames/{f}.png" for f in c["frames"]],
         "center_index": c["center_index"],
         "dt_hours": c["dt_hours"],
     }
@@ -408,8 +408,8 @@ def summary(sid, ex):
                 "case_id": r["case_id"],
                 "outcome": r["outcome"],
                 "month": c["month"] if c else None,
-                "frame": f"/frames/{c['frames'][c['center_index']]}.png" if c else None,
-                "overlay": f"/api/overlay/{r['case_id']}.png",
+                "frame": f"frames/{c['frames'][c['center_index']]}.png" if c else None,
+                "overlay": f"api/overlay/{r['case_id']}.png",
                 "clicks": json.loads(r["clicks"]),
                 "click_matched": [
                     d["matched_col_id"] is not None for d in json.loads(r["click_details"])

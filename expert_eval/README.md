@@ -5,14 +5,20 @@ the box, and where is its centre?* Their answers are compared with the AtmoTrack
 (`tracking/col.py`). The **expert is the reference**. Every answer is stored with the algorithm's
 criteria values so disagreements can be traced to specific criteria and the thresholds tuned.
 
+Live site: **https://meteorologia.uib.es/dana/** (PHP version on the group web host, see section 2b).
+
 ```
 build_cases.py      offline: scan tracking output, pick cases, render maps (needs the AtmoTrack env)
-app.py              Flask server (needs only Flask + cases/)
+app.py              Flask server for local use (needs only Flask + cases/)
+php/                PHP server for the web host (same API and logic as app.py/evaluate.py/sampler.py)
+host.sh             deploy to the web host, run admin commands there, pull the answers back
 evaluate.py         click ↔ algorithm matching and outcomes (stdlib)
 sampler.py          stratified, disagreement-weighted session drawing (stdlib)
+schema.sql          database schema shared by the Python and PHP servers
+static/             the web page (index.html, app.js, style.css), shared by both servers
 criteria.py         per-step re-implementation of the col.py criteria (numpy/scipy)
 enrich_responses.py offline: criteria around every expert click
-admin.py            invite codes, CSV exports, report, threshold sweep (stdlib)
+admin.py            CSV exports, report, threshold sweep, invite codes for a local site (stdlib)
 settings.toml       session sizes, class mix, sampling priors, build options
 ```
 
@@ -47,7 +53,7 @@ python build_cases.py --n-cases 600 --jobs 8  # scan + select + render
 The pool quotas are in `settings.toml [build]`. Selection spreads cases across seasons and borderline
 tags, and keeps cases from the same event at least 72 h apart.
 
-## 2. Run the site
+## 2. Run the site locally
 
 ```bash
 pip install -r requirements.txt           # flask
@@ -75,11 +81,133 @@ For more than a handful of simultaneous users, serve with a WSGI server, e.g.
 Sessions contain 40–60 % algorithm-COL cases. Cases experts often disagree on (or mark unsure) are drawn
 more often (`settings.toml [sampling]`). Cases with few answers get a novelty bonus.
 
+## 2b. Live site on meteorologia.uib.es (PHP)
+
+**https://meteorologia.uib.es/dana/**
+
+The group web host is shared hosting: no Python 3 and no long-running processes, but PHP 8.1 and
+SQLite. It runs the PHP version of the server in `php/`, which has the same requests, evaluation and
+sampling as `app.py`, `evaluate.py` and `sampler.py`. The web page (`static/`), the case pool and the
+database format are shared with the Flask version, so the Python analysis tools work on its answers.
+
+### What lives where
+
+On the host, under `/srv/www/meteorologia.uib.es/` (account `meteorologia`):
+
+| folder | contents | public? |
+|---|---|---|
+| `web/dana/` | `index.html`, `static/`, `frames/` (maps), `api.php`, `.htaccess` | yes |
+| `dana_app/` | PHP code, `settings.json`, `schema.sql`, `cases/` (manifest, evaluation files, overlays), `dev/` (test helpers) | no |
+| `dana_data/` | `responses.sqlite` (all answers and invite codes), `secret_key` (signs the login cookie) | no |
+
+On `medicane`, in `expert_eval/`: the source code, the built case pool (`cases/`) and `host.sh`.
+Everything is prepared on `medicane` and pushed to the host. Nothing is edited on the host directly.
+
+### Requirements (on medicane)
+
+- The SSH key `~/.ssh/meteo`, which the host accepts for `meteorologia@meteorologia.uib.es`.
+  `~/.ssh/config` maps it, so `ssh meteorologia` logs in without a password. Plain
+  `ssh meteorologia@meteorologia.uib.es` without that config (or from another machine) asks for
+  the password, because SSH does not try non-default key names on its own. `host.sh` always passes
+  the key explicitly.
+- Python ≥ 3.11 as `python3` (for reading `settings.toml`); override with `PYTHON=/path/to/python`.
+- The AtmoTrack conda environment, only for building cases.
+
+### Step by step
+
+Run everything from `expert_eval/` on `medicane`.
+
+**1. Build or extend the case pool** (see section 1):
+
+```bash
+conda activate atmotrack
+python build_cases.py --n-cases 600 --jobs 8      # first build; later runs append new cases
+```
+
+**2. Adjust the session settings (optional).** Edit `settings.toml`: `[session]` for session sizes
+and the share of algorithm-DANA cases, `[sampling]` for how strongly disputed cases are favoured,
+and `[review]` for the reason options. Changes take effect at the next deploy.
+
+**3. Deploy** code, cases and maps:
+
+```bash
+./host.sh deploy
+```
+
+It uploads only what changed (the first upload of ~450 MB of maps takes a few minutes), creates
+the database if it does not exist, and registers new cases. Existing answers, experts and invite
+codes are kept, so re-deploying is safe at any time.
+
+**4. Check it works.** Open https://meteorologia.uib.es/dana/ in a browser. Optionally run the PHP
+test suite on the host (section Tests). It uses a throwaway database, not the live one.
+
+**5. Create invite codes**, one per expert. The label identifies them later in `admin.py report`:
+
+```bash
+./host.sh admin add-codes --n 10 --label pilot    # prints CODE<TAB>label, e.g. K7Q2-9XPM  pilot-1
+./host.sh admin add-codes --n 1 --label AEMET
+```
+
+Codes must be created this way, on the host database. `python admin.py add-codes` only writes to a
+local database. Experts can also sign in without a code using their name, email and experience.
+
+**6. Invite experts.** Send each one the link, their personal code and a short note, for example:
+
+> Please help us evaluate an automatic cut-off low (DANA) detector: https://meteorologia.uib.es/dana/
+> Your invite code: K7Q2-9XPM. Use a laptop or desktop. Each session shows 10 maps (you can choose
+> more). You can end at any time, see how the algorithm compared with you, and come back later with
+> the same code: the site remembers you for 90 days on the same browser.
+
+**7. Follow progress:**
+
+```bash
+./host.sh admin stats          # experts, sessions, answers, reviews, outcome counts
+./host.sh admin list-codes     # which codes have been used and how many answers each
+```
+
+**8. Analyse the answers.** Copy them to `medicane`, then use the tools in sections 3 and 4:
+
+```bash
+./host.sh pull-db                                   # consistent snapshot -> data/responses_host.sqlite
+export EXPERT_EVAL_DB=data/responses_host.sqlite
+python enrich_responses.py                          # optional, AtmoTrack env
+python admin.py report
+python admin.py export-tuning tuning.csv
+python admin.py sweep
+```
+
+`pull-db` briefly pauses writers while copying, so the snapshot is consistent even while experts are
+answering. Always analyse the copy; never copy a local database back to the host.
+
+### Other operations
+
+| task | how |
+|---|---|
+| add more cases later | `python build_cases.py --n-cases 200`, then `./host.sh deploy`. New cases enter the sampling at once; answers stay |
+| change the page or server code | edit `static/` or `php/`, run the tests, then `./host.sh deploy` |
+| take the site offline | `ssh meteorologia 'mv /srv/www/meteorologia.uib.es/web/dana /srv/www/meteorologia.uib.es/web/dana.off'` (reverse the `mv` to bring it back; answers are untouched; don't deploy while offline, it recreates the folder) |
+| back up the answers | `./host.sh pull-db data/backup-$(date +%F).sqlite` |
+| start again with an empty database (**deletes all answers and codes**) | back up first, then `ssh meteorologia 'cd /srv/www/meteorologia.uib.es/dana_app && rm ../dana_data/responses.sqlite ../dana_data/cases_synced && php admin.php init'`. Experts have to sign in again |
+| see who visited | Apache access log in `/srv/www/meteorologia.uib.es/logs/` (lines containing `/dana/`) |
+
+### Good to know
+
+- **Deploy from one place.** `host.sh deploy` mirrors `static/`, `php/` and `cases/` from the
+  machine it runs on, so always deploy from the same, up-to-date checkout.
+- **Host limits.** SQLite on the host is 3.7.17 and sits on a network disk, so the PHP code avoids
+  newer SQL (no UPSERT) and uses SQLite's classic rollback journal. It handles a handful of experts
+  answering at the same time without trouble.
+- **SSH rate limit.** The university blocks addresses that open many SSH connections in a short
+  time (for both SSH and the website, for several minutes). `host.sh` and the tests reuse a single
+  connection. Avoid loops of separate `ssh` commands.
+- **Login cookie.** Signed, valid for 90 days, scoped to `/dana/`, and marked Secure over HTTPS.
+
 ## 3. Analyse
 
-All answers are stored in `data/responses.sqlite` on the machine that runs `app.py`. Run the
-analysis commands from `expert_eval/` on that machine (they are safe to run while the site is up).
-Keep a single running copy of the site, otherwise answers end up split across databases.
+For the live site, first copy the answers here with `./host.sh pull-db` and prefix the commands
+below with `EXPERT_EVAL_DB=data/responses_host.sqlite`. For a local Flask site, the answers are in
+`data/responses.sqlite` on the machine that runs `app.py` (safe to analyse while it runs). Keep a
+single live copy of the site, otherwise answers end up split across databases.
 
 ```bash
 python enrich_responses.py                # optional: criteria around each click (needs numpy, scipy)
@@ -212,7 +340,20 @@ are JSON), `reviews`, `click_diagnostics`, `cases`.
 ## Tests
 
 ```bash
-EXPERT_EVAL_CASES_DIR=/path/to/small/pool python -m pytest -q test_expert_eval.py
+EXPERT_EVAL_CASES_DIR=cases python -m pytest -q test_expert_eval.py
 ```
 
 `EXPERT_EVAL_CASES_DIR`, `EXPERT_EVAL_DB` and `EXPERT_EVAL_SETTINGS` override the paths in settings.toml.
+
+The PHP server is tested against the Python code. Run it on the host after deploying, so it uses the
+host's own PHP and SQLite. It opens a temporary PHP server there through an SSH port forward, with a
+throwaway database next to the real one that is removed afterwards:
+
+```bash
+EXPERT_EVAL_CASES_DIR=cases PHP_SSH_HOST=meteorologia@meteorologia.uib.es PHP_SSH_KEY=~/.ssh/meteo \
+  python -m pytest -q test_php_backend.py
+```
+
+It checks that `evaluate.php` matches `evaluate.py` on hundreds of clicks over real cases, the sampler's
+properties, and the full expert flow of `test_expert_eval.api_flow`. With a local PHP that has the
+zlib extension, use `PHP_BIN=/path/to/php` instead of the SSH variables.
