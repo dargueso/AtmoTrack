@@ -151,6 +151,11 @@ def main():
     os.makedirs(plots_dir, exist_ok=True)
 
     stat_files = sorted(glob.glob(f"{cfg.stats_dir}/events_stats_????.csv"))
+    if not stat_files:
+        sys.exit(
+            f"No events_stats_????.csv files found in {os.path.abspath(cfg.stats_dir)}\n"
+            "Run calc_COL_stats_all_watersheds.py first, or set stats_dir in config.toml."
+        )
 
     dfs = []
     for stat_fin in stat_files:

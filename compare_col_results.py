@@ -4,8 +4,8 @@ compare_col_results.py — Diagnostic comparison of two COL tracking output file
 
 Usage
 -----
-    python3 compare_col_results.py --current  data_tracking/era5_daily_col_z500_2000.nc \
-                                   --original /path/to/original/era5_daily_col_z500_2000.nc
+    python3 compare_col_results.py --current  data_tracking/col_z500_2000.nc \
+                                   --original /path/to/original/col_z500_2000.nc
 
 The script checks:
   1. Exact array equality for col_objects and cy_z500_objects.
@@ -176,7 +176,7 @@ def main() -> None:
         "--current",
         required=True,
         metavar="NC",
-        help="Current code output (e.g. data_tracking/era5_daily_col_z500_2000.nc)",
+        help="Current code output (e.g. data_tracking/col_z500_2000.nc)",
     )
     parser.add_argument(
         "--original", required=True, metavar="NC", help="Original code output for the same year"
