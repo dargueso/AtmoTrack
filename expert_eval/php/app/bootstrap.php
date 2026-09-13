@@ -18,6 +18,8 @@ define('DANA_CASES', rtrim(getenv('DANA_CASES_DIR') ?: DANA_APP . '/cases', '/')
 define('DANA_DATA', rtrim(getenv('DANA_DATA_DIR') ?: dirname(DANA_APP) . '/dana_data', '/'));
 define('DANA_SETTINGS', getenv('DANA_SETTINGS') ?: DANA_APP . '/settings.json');
 define('DANA_SCHEMA', getenv('DANA_SCHEMA') ?: DANA_APP . '/schema.sql');
+define('DANA_EMAIL_TEMPLATE', getenv('DANA_EMAIL_TEMPLATE') ?: DANA_APP . '/email_code.txt');
+define('DANA_MAIL_OUTBOX', getenv('DANA_MAIL_OUTBOX') ?: '');  // tests: write emails here instead of sending
 
 const EXPERIENCE = ['Operational forecaster', 'Researcher', 'Student / early career', 'Other'];
 const AGREE = ['agree_hit', 'agree_null'];
@@ -27,6 +29,7 @@ const COOKIE_DAYS = 90;
 ini_set('serialize_precision', '-1');  // shortest float representation in json_encode
 
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/mail.php';
 require_once __DIR__ . '/evaluate.php';
 require_once __DIR__ . '/sampler.php';
 
@@ -98,6 +101,29 @@ function cookie_path(): string
     }
     $dir = str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '/'));
     return rtrim($dir, '/') . '/';
+}
+
+/** Keyed fingerprint (HMAC-SHA256) — used so emails and IPs are never stored in clear. */
+function fingerprint(string $value): string
+{
+    return hash_hmac('sha256', $value, secret_key());
+}
+
+function new_invite_code(PDO $pdo): string
+{
+    $alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    do {
+        $code = '';
+        for ($c = 0; $c < 8; $c++) {
+            $code .= ($c === 4 ? '-' : '') . $alphabet[random_int(0, strlen($alphabet) - 1)];
+        }
+    } while (q1($pdo, 'SELECT 1 AS x FROM invite_codes WHERE code = ?', [$code]));
+    return $code;
+}
+
+function iso_ago(int $seconds): string
+{
+    return gmdate('Y-m-d\TH:i:s', time() - $seconds) . '+00:00';
 }
 
 function set_auth_cookie(?int $expertId): void

@@ -1,0 +1,14 @@
+Hello {name},
+
+Thank you for helping us evaluate our automatic cut-off low (DANA) detection.
+
+Your personal code:  {code}
+
+Open {site_url}, choose "I have an invite code" and enter it.
+Please use the same code whenever you come back: your answers are kept under it.
+
+Your email address was only used to send this message and is not stored.
+If you did not request this code, you can ignore this email.
+
+--
+{from_name}

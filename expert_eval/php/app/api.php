@@ -124,6 +124,7 @@ function h_config(): void
         'default_cases' => $s['default_cases'],
         'extend_by' => $s['extend_by'],
         'experience_options' => EXPERIENCE,
+        'request_mode' => settings()['email']['mode'] ?? 'send',
         'expert' => $ex ? expert_public($ex) : null,
     ]);
 }
@@ -133,45 +134,109 @@ function h_login(): void
     $b = request_body();
     $pdo = db();
     $code = strtoupper(trim((string) ($b['code'] ?? '')));
-    if ($code !== '') {
-        $row = q1($pdo, 'SELECT * FROM invite_codes WHERE code = ?', [$code]);
-        if ($row === null) {
-            fail(400, 'Unknown invite code');
-        }
-        if ($row['expert_id'] === null) {
-            $pdo->beginTransaction();
-            qexec($pdo, "INSERT INTO experts (auth, code, name, created_at) VALUES ('code', ?, ?, ?)",
-                [$code, $row['label'], now_iso()]);
-            $eid = (int) $pdo->lastInsertId();
-            qexec($pdo, 'UPDATE invite_codes SET expert_id = ? WHERE code = ?', [$eid, $code]);
-            $pdo->commit();
-        } else {
-            $eid = (int) $row['expert_id'];
-        }
+    if ($code === '') {
+        fail(400, 'Please enter your invite code');
+    }
+    $row = q1($pdo, 'SELECT * FROM invite_codes WHERE code = ?', [$code]);
+    if ($row === null) {
+        fail(400, 'Unknown invite code');
+    }
+    if ($row['expert_id'] === null) {
+        // first use: the expert takes the details given when the code was requested, if any
+        $req = q1($pdo, 'SELECT name, affiliation, experience FROM code_requests WHERE code = ?', [$code]);
+        $pdo->beginTransaction();
+        qexec($pdo, "INSERT INTO experts (auth, code, name, affiliation, experience, created_at)
+                     VALUES ('code', ?, ?, ?, ?, ?)",
+            [$code, $req['name'] ?? $row['label'], $req['affiliation'] ?? null, $req['experience'] ?? null, now_iso()]);
+        $eid = (int) $pdo->lastInsertId();
+        qexec($pdo, 'UPDATE invite_codes SET expert_id = ? WHERE code = ?', [$eid, $code]);
+        $pdo->commit();
     } else {
-        // no email is asked for or stored; a returning expert without a code is recognised
-        // by name + affiliation (case-insensitive), otherwise by the login cookie
-        $squash = fn($v) => trim((string) preg_replace('/\s+/u', ' ', (string) $v));
-        $name = $squash($b['name'] ?? '');
-        $affiliation = $squash($b['affiliation'] ?? '') ?: null;
-        $experience = trim((string) ($b['experience'] ?? ''));
-        if ($name === '' || !in_array($experience, EXPERIENCE, true)) {
-            fail(400, 'Please give your name and your experience');
-        }
-        $row = q1($pdo, "SELECT id FROM experts WHERE auth = 'profile' AND lower(name) = lower(?)
-                         AND lower(COALESCE(affiliation, '')) = lower(?) ORDER BY id LIMIT 1",
-            [$name, $affiliation ?? '']);
-        if ($row) {
-            $eid = (int) $row['id'];
-            qexec($pdo, 'UPDATE experts SET experience = ? WHERE id = ?', [$experience, $eid]);
-        } else {
-            qexec($pdo, "INSERT INTO experts (auth, name, affiliation, experience, created_at)
-                         VALUES ('profile', ?, ?, ?, ?)", [$name, $affiliation, $experience, now_iso()]);
-            $eid = (int) $pdo->lastInsertId();
-        }
+        $eid = (int) $row['expert_id'];
     }
     set_auth_cookie($eid);
     json_out(['expert' => expert_public(q1($pdo, 'SELECT * FROM experts WHERE id = ?', [$eid]))]);
+}
+
+const REQUEST_OK = 'Thank you. If the address is valid, your code is on its way: please check your inbox (and the spam folder).';
+const REQUEST_OK_NOTIFY = 'Thank you. We have received your request and will email you your personal code shortly.';
+
+function request_ok_message(): string
+{
+    return (settings()['email']['mode'] ?? 'send') === 'notify' ? REQUEST_OK_NOTIFY : REQUEST_OK;
+}
+const REQUEST_LIMITED = 'Too many requests. Please try again later.';
+
+/**
+ * Request a personal code by email. The address is used to send the message and then discarded:
+ * only a keyed fingerprint is stored, so a repeat request resends the same code.
+ */
+function h_request_code(): void
+{
+    $b = request_body();
+    if (trim((string) ($b['website'] ?? '')) !== '') {  // hidden spam-trap field
+        json_out(['ok' => true, 'message' => request_ok_message()]);
+    }
+    $squash = fn($v) => trim((string) preg_replace('/\s+/u', ' ', (string) $v));
+    $name = $squash($b['name'] ?? '');
+    $affiliation = $squash($b['affiliation'] ?? '');
+    $experience = trim((string) ($b['experience'] ?? ''));
+    $email = strtolower(trim((string) ($b['email'] ?? '')));
+    if ($name === '' || $affiliation === '' || !in_array($experience, EXPERIENCE, true)
+        || strlen($name) > 120 || strlen($affiliation) > 200) {
+        fail(400, 'Please give your name, institution and experience');
+    }
+    if (strlen($email) > 254 || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        fail(400, 'Please give a valid email address');
+    }
+
+    $cfg = settings()['email'];
+    $pdo = db();
+    $ipRaw = trim(explode(',', (string) ($_SERVER['HTTP_X_FORWARDED_FOR'] ?? ''))[0]) ?: ($_SERVER['REMOTE_ADDR'] ?? '');
+    $ipHash = fingerprint('ip:' . $ipRaw);
+    $emailHash = fingerprint('email:' . $email);
+    $count = fn(string $sql, array $p) => (int) q1($pdo, $sql, $p)['n'];
+
+    qexec($pdo, 'DELETE FROM request_log WHERE created_at < ?', [iso_ago(7 * 86400)]);
+    $limited = $count('SELECT COUNT(*) AS n FROM request_log WHERE ip_hash = ? AND created_at >= ?', [$ipHash, iso_ago(3600)]) >= $cfg['max_per_ip_per_hour']
+        || $count('SELECT COUNT(*) AS n FROM request_log WHERE email_hash = ? AND sent = 1 AND created_at >= ?', [$emailHash, iso_ago(86400)]) >= $cfg['max_per_email_per_day']
+        || $count('SELECT COUNT(*) AS n FROM request_log WHERE sent = 1 AND created_at >= ?', [iso_ago(3600)]) >= $cfg['max_total_per_hour'];
+    qexec($pdo, 'INSERT INTO request_log (created_at, ip_hash, email_hash, sent) VALUES (?, ?, ?, 0)', [now_iso(), $ipHash, $emailHash]);
+    if ($limited) {
+        fail(429, REQUEST_LIMITED);
+    }
+
+    $pdo->beginTransaction();
+    try {
+        $existing = q1($pdo, 'SELECT id, code, name, affiliation, experience, n_sent FROM code_requests WHERE email_hash = ?', [$emailHash]);
+        if ($existing) {
+            $code = $existing['code'];
+            $greet = $existing['name'];
+            [$affiliation, $experience] = [(string) $existing['affiliation'], $existing['experience']];
+            $nSent = (int) $existing['n_sent'] + 1;
+            qexec($pdo, 'UPDATE code_requests SET last_sent_at = ?, n_sent = n_sent + 1 WHERE id = ?', [now_iso(), $existing['id']]);
+        } else {
+            $code = new_invite_code($pdo);
+            $greet = $name;
+            $nSent = 1;
+            qexec($pdo, 'INSERT INTO invite_codes (code, label, created_at) VALUES (?, ?, ?)', [$code, $name, now_iso()]);
+            qexec($pdo, 'INSERT INTO code_requests (email_hash, code, name, affiliation, experience, created_at, last_sent_at, n_sent)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, 1)', [$emailHash, $code, $name, $affiliation, $experience, now_iso(), now_iso()]);
+        }
+        if (($cfg['mode'] ?? 'send') === 'notify') {
+            send_request_notification($email, $greet, $affiliation, $experience, $code, $nSent);
+        } else {
+            send_code_email($email, $greet, $code);
+        }
+        qexec($pdo, 'INSERT INTO request_log (created_at, ip_hash, email_hash, sent) VALUES (?, ?, ?, 1)', [now_iso(), $ipHash, $emailHash]);
+        $pdo->commit();
+    } catch (Throwable $e) {
+        $pdo->rollBack();
+        error_log('[dana] code request failed: ' . $e->getMessage());
+        $contact = sender_address($cfg);
+        fail(500, 'We could not send the email right now. Please try again later' . ($contact ? " or write to $contact" : '') . '.');
+    }
+    json_out(['ok' => true, 'message' => request_ok_message()]);
 }
 
 function h_logout(): void
@@ -189,7 +254,8 @@ function h_new_session(): void
     if (!$ids) {
         fail(409, 'You have already answered every case in the pool. Thank you!');
     }
-    $algoVersion = jenc(['git_hash' => $m['git_hash'] ?? null, 'col_params' => $m['col_params'] ?? null]);
+    $algoVersion = jenc(['version' => $m['algo_version'] ?? null, 'git_hash' => $m['git_hash'] ?? null,
+                         'col_params' => $m['col_params'] ?? null]);
     $pdo = db();
     qexec($pdo, 'INSERT INTO sessions (expert_id, n_requested, n_pos_planned, case_order, algo_version, started_at)
                  VALUES (?, ?, ?, ?, ?, ?)', [$ex['id'], $n, $nPos, jenc($ids), $algoVersion, now_iso()]);
@@ -395,6 +461,8 @@ if ($method === 'GET' && $route === 'config') {
     h_overlay($mm[1]);
 } elseif ($method === 'POST' && $route === 'login') {
     h_login();
+} elseif ($method === 'POST' && $route === 'request-code') {
+    h_request_code();
 } elseif ($method === 'POST' && $route === 'logout') {
     h_logout();
 } elseif ($method === 'POST' && $route === 'session') {

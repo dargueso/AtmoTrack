@@ -129,27 +129,42 @@ function drawMarkers(container, clicks, opts = {}) {
 // Sign-in
 // ---------------------------------------------------------------------------
 function setupSignin() {
-  $$(".tab").forEach((t) => t.addEventListener("click", () => {
-    $$(".tab").forEach((x) => x.classList.toggle("active", x === t));
-    $("#form-code").hidden = t.dataset.tab !== "code";
-    $("#form-profile").hidden = t.dataset.tab !== "profile";
+  const showTab = (name) => {
+    $$(".tab").forEach((x) => x.classList.toggle("active", x.dataset.tab === name));
+    $("#form-code").hidden = name !== "code";
+    $("#form-request").hidden = name !== "request";
     showError($("#signin-error"), null);
-  }));
-  const sel = $("#form-profile select[name=experience]");
+  };
+  $$(".tab").forEach((t) => t.addEventListener("click", () => { showTab(t.dataset.tab); $("#signin-ok").hidden = true; }));
+  $$("[data-goto]").forEach((a) => a.addEventListener("click", (ev) => { ev.preventDefault(); showTab(a.dataset.goto); }));
+  $$("[data-mode]").forEach((p) => { p.hidden = p.dataset.mode !== (state.config.request_mode || "send"); });
+  const sel = $("#form-request select[name=experience]");
   sel.innerHTML = `<option value="">Choose…</option>` +
     state.config.experience_options.map((o) => `<option>${o}</option>`).join("");
 
-  const submit = async (ev, payload) => {
+  $("#form-code").addEventListener("submit", async (ev) => {
     ev.preventDefault();
     try {
-      const r = await api("api/login", payload);
+      const r = await api("api/login", { code: new FormData(ev.target).get("code") });
       onSignedIn(r.expert);
     } catch (err) { showError($("#signin-error"), err); }
-  };
-  $("#form-code").addEventListener("submit", (ev) =>
-    submit(ev, { code: new FormData(ev.target).get("code") }));
-  $("#form-profile").addEventListener("submit", (ev) =>
-    submit(ev, Object.fromEntries(new FormData(ev.target))));
+  });
+  $("#form-request").addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const btn = $("button[type=submit]", ev.target);
+    btn.disabled = true;
+    try {
+      const r = await api("api/request-code", Object.fromEntries(new FormData(ev.target)));
+      ev.target.reset();
+      showTab("code");
+      $("#signin-ok").textContent = r.message;
+      $("#signin-ok").hidden = false;
+    } catch (err) {
+      showError($("#signin-error"), err);
+    } finally {
+      btn.disabled = false;
+    }
+  });
 }
 
 function onSignedIn(expert) {

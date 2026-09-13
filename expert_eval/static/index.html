@@ -25,18 +25,27 @@
       reference: we use it to find where our algorithm needs to improve.</p>
     <div class="tabs" role="tablist">
       <button class="tab active" data-tab="code" role="tab">I have an invite code</button>
-      <button class="tab" data-tab="profile" role="tab">Enter my details</button>
+      <button class="tab" data-tab="request" role="tab">Request a code</button>
     </div>
     <form id="form-code" class="tabpane">
       <label>Invite code <input name="code" autocomplete="off" required placeholder="e.g. K7Q2-9XPM"></label>
       <button class="btn btn-primary" type="submit">Continue</button>
+      <p class="muted small">No code yet? Use <a href="#" data-goto="request">Request a code</a>. Lost it? Request
+        it again with the same email and we will resend it.</p>
     </form>
-    <form id="form-profile" class="tabpane" hidden>
-      <label>Name <input name="name" required autocomplete="name"></label>
-      <label>Affiliation <span class="muted">(optional)</span> <input name="affiliation" autocomplete="organization"></label>
+    <form id="form-request" class="tabpane" hidden>
+      <label>Name <input name="name" required maxlength="120" autocomplete="name"></label>
+      <label>Email <input name="email" type="email" required maxlength="254" autocomplete="email"></label>
+      <label>Institution <input name="affiliation" required maxlength="200" autocomplete="organization"></label>
       <label>Experience <select name="experience" required></select></label>
-      <button class="btn btn-primary" type="submit">Continue</button>
+      <label class="hp" aria-hidden="true">Website <input name="website" tabindex="-1" autocomplete="off"></label>
+      <p class="muted small" data-mode="send" hidden>We email you a personal code. Your email address is only used
+        to send it and is not stored.</p>
+      <p class="muted small" data-mode="notify" hidden>We will email you a personal code. Your address is forwarded
+        to the organisers only to send it; the site does not store it.</p>
+      <button class="btn btn-primary" type="submit">Send me a code</button>
     </form>
+    <p id="signin-ok" class="ok" hidden></p>
     <p id="signin-error" class="error" hidden></p>
   </section>
 

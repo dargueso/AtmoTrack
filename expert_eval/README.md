@@ -53,6 +53,34 @@ python build_cases.py --n-cases 600 --jobs 8  # scan + select + render
 The pool quotas are in `settings.toml [build]`. Selection spreads cases across seasons and borderline
 tags, and keeps cases from the same event at least 72 h apart.
 
+### High-impact events
+
+`high_impact_events.toml` lists the high-impact DANA events (daily precipitation > 400 mm or
+catastrophic floods) from the slides in `DANASv3.pdf` (slides 11-26): 31 events, each with the ERA5
+map times shown on the slides. They are included with:
+
+```bash
+python build_cases.py --high-impact high_impact_events.toml --target-total 1000 --jobs 16
+```
+
+- **One case per event.** The case time is chosen so that the expert's ±24 h loop covers as many
+  of the slide maps as possible (then: a slide map, the middle of the covered maps, the later time).
+  The log lists the chosen times; set `case_time` in the TOML to override one.
+- **Tagged, not revealed.** These cases get the tag `high_impact` and a `high_impact_event` id in
+  their evaluation file and in the manifest; experts are not told which cases they are. An event
+  whose time is already in the pool is only tagged.
+- **Forced, then topped up.** `--target-total N` adds stratified cases until the pool has N cases
+  with the category proportions of `[build] quota_*`; the high-impact cases count towards their
+  category. (`--n-cases` still adds a fixed number instead.)
+- **Answered often.** `[session] high_impact_fraction` (default 0.1) reserves at least that share of
+  every session for high-impact cases, picking those with the fewest answers first, so all events
+  build up answers evenly. They still count towards the 40–60 % COL balance.
+- **Reported separately.** `admin.py report` has a *High-impact events* section, and
+  `admin.py high-impact --csv events.csv` exports the per-event verdicts to discuss with reviewers
+  (section 4).
+- **Deploy after rebuilding.** `./host.sh deploy` uploads the new cases and refreshes the tags on
+  the host database.
+
 ## 2. Run the site locally
 
 ```bash
@@ -61,7 +89,10 @@ python admin.py add-codes --n 5 --label AEMET
 python app.py                             # http://<host>:5050
 ```
 
-Experts sign in with **either** an invite code **or** their details (name, affiliation, experience; no email is asked for or stored).
+Experts sign in with a personal **invite code**. Without one, they use **Request a code** on the sign-in page
+(name, email, institution, experience). The site creates the code at once and emails the request to the
+organisers, who reply with the code (see section 2b). The database keeps only a keyed fingerprint of the
+address, so a repeat request brings back the same code.
 For more than a handful of simultaneous users, serve with a WSGI server, e.g.
 `pip install waitress && waitress-serve --port 5050 app:app`.
 
@@ -98,7 +129,7 @@ On the host, under `/srv/www/meteorologia.uib.es/` (account `meteorologia`):
 |---|---|---|
 | `web/dana/` | `index.html`, `static/`, `frames/` (maps), `api.php`, `.htaccess` | yes |
 | `dana_app/` | PHP code, `settings.json`, `schema.sql`, `cases/` (manifest, evaluation files, overlays), `dev/` (test helpers) | no |
-| `dana_data/` | `responses.sqlite` (all answers and invite codes), `secret_key` (signs the login cookie) | no |
+| `dana_data/` | `responses.sqlite` (answers, invite codes, code requests), `secret_key` (signs the login cookie and keys the email fingerprints) | no |
 
 On `medicane`, in `expert_eval/`: the source code, the built case pool (`cases/`) and `host.sh`.
 Everything is prepared on `medicane` and pushed to the host. Nothing is edited on the host directly.
@@ -141,7 +172,14 @@ codes are kept, so re-deploying is safe at any time.
 **4. Check it works.** Open https://meteorologia.uib.es/dana/ in a browser. Optionally run the PHP
 test suite on the host (section Tests). It uses a throwaway database, not the live one.
 
-**5. Create invite codes**, one per expert. The label identifies them later in `admin.py report`:
+**5. Codes: let experts request them, or hand them out.** Experts without a code click **Request a
+code** on the sign-in page and fill in name, email, institution and experience. The site creates their
+personal code at once and emails the request to `settings.toml [email] notify_address`
+(`d.argueso@uib.es`). That email lists name, institution, experience, email and code, has the
+requester as **Reply-To**, and includes a ready-made reply: press Reply, paste, send. If they lose
+the code, they request again with the same address; you get a "[repeat]" email with the same code.
+You can also create codes yourself, for people you invite directly; the label identifies them later
+in `admin.py report`:
 
 ```bash
 ./host.sh admin add-codes --n 10 --label pilot    # prints CODE<TAB>label, e.g. K7Q2-9XPM  pilot-1
@@ -149,20 +187,47 @@ test suite on the host (section Tests). It uses a throwaway database, not the li
 ```
 
 Codes must be created this way, on the host database. `python admin.py add-codes` only writes to a
-local database. Experts can also sign in without a code using their name, affiliation and experience (no email). Signing in again with the same name and affiliation continues as the same expert.
+local database.
 
-**6. Invite experts.** Send each one the link, their personal code and a short note, for example:
+**5b. Send the codes automatically with Power Automate (set up once).** A cloud flow in the
+`d.argueso@uib.es` Microsoft 365 account answers each request email from that mailbox, so no manual
+reply is needed and no password is stored on the web host. Each request email carries, at the bottom,
+a secret key and base64-encoded recipient and reply text (`[DANA-KEY]`, `[DANA-TO]`, `[DANA-BODY]`),
+so the flow copies the ready-made reply without parsing text and ignores emails that lack the key.
+
+1. Get the key: `./host.sh admin flow-key` (stored on the host as `dana_data/flow_key`).
+2. In Outlook, create a folder **DANA requests**.
+3. https://make.powerautomate.com → **Create → Automated cloud flow** → trigger **When a new email
+   arrives (V3)** (Office 365 Outlook). Folder `Inbox`; under *Advanced parameters*: **From**
+   `d.argueso@uib.es`, **Subject Filter** `DANA Expert Check: code request`, **Include Attachments** `No`.
+4. Add a **Condition**: left value (fx)
+   `contains(triggerOutputs()?['body/body'], '[DANA-KEY]<key>[/DANA-KEY]')`, *is equal to*, right
+   value (fx) `true`.
+5. In **True**, add **Send an email (V2)**:
+   - **To** (fx): `base64ToString(trim(first(split(last(split(triggerOutputs()?['body/body'], '[DANA-TO]')), '[/DANA-TO]'))))`
+   - **Subject**: `Your DANA Expert Check code`
+   - **Body** (fx): `base64ToString(trim(first(split(last(split(triggerOutputs()?['body/body'], '[DANA-BODY]')), '[/DANA-BODY]'))))`
+6. Below it, add **Move email (V2)**: **Message Id** (fx) `triggerOutputs()?['body/id']`, **Folder** `DANA requests`. Save.
+
+If a code does not arrive, check the flow's **Run history**. If the flow never runs, remove the *From*
+filter (the key check still protects it). Changing the key (deleting `dana_data/flow_key` on the host)
+requires updating the Condition. Replies are sent as `d.argueso@uib.es` through Microsoft 365, which
+external providers such as iCloud accept.
+
+**6. Invite experts.** Send the link and a short note, for example:
 
 > Please help us evaluate an automatic cut-off low (DANA) detector: https://meteorologia.uib.es/dana/
-> Your invite code: K7Q2-9XPM. Use a laptop or desktop. Each session shows 10 maps (you can choose
-> more). You can end at any time, see how the algorithm compared with you, and come back later with
-> the same code: the site remembers you for 90 days on the same browser.
+> Click "Request a code" and we will email you a personal code. Use a laptop or desktop. Each session shows 10 maps (you can choose more). You can end at
+> any time, see how the algorithm compared with you, and come back later with the same code.
+
+If you created a code for them with `add-codes`, include it instead of the "Request a code" line.
 
 **7. Follow progress:**
 
 ```bash
-./host.sh admin stats          # experts, sessions, answers, reviews, outcome counts
-./host.sh admin list-codes     # which codes have been used and how many answers each
+./host.sh admin stats          # code requests, experts, sessions, answers, reviews, outcome counts
+./host.sh admin requests       # requested codes: name, institution, experience, emails sent, used, answers
+./host.sh admin list-codes     # all codes (requested and handed out), used or not, answers each
 ```
 
 **8. Analyse the answers.** Copy them to `medicane`, then use the tools in sections 3 and 4:
@@ -185,9 +250,13 @@ answering. Always analyse the copy; never copy a local database back to the host
 |---|---|
 | add more cases later | `python build_cases.py --n-cases 200`, then `./host.sh deploy`. New cases enter the sampling at once; answers stay |
 | change the page or server code | edit `static/` or `php/`, run the tests, then `./host.sh deploy` |
+| check that request emails get through | `./host.sh test-email d.argueso@uib.es` |
+| change where requests go, the texts or limits | `settings.toml [email]` (`notify_address`, limits), `email_request.html` (request email), `email_reply.html` (the reply the expert receives) or `email_code.txt`, then `./host.sh deploy` |
+| email codes straight to experts instead | needs a sender that external providers accept (e.g. an approved UIB service account): set `mode = "send"`, `transport = "smtp"` and the `smtp_*` settings, `./host.sh deploy`, then `./host.sh set-smtp` |
 | take the site offline | `ssh meteorologia 'mv /srv/www/meteorologia.uib.es/web/dana /srv/www/meteorologia.uib.es/web/dana.off'` (reverse the `mv` to bring it back; answers are untouched; don't deploy while offline, it recreates the folder) |
 | back up the answers | `./host.sh pull-db data/backup-$(date +%F).sqlite` |
-| start again with an empty database (**deletes all answers and codes**) | back up first, then `ssh meteorologia 'cd /srv/www/meteorologia.uib.es/dana_app && rm ../dana_data/responses.sqlite ../dana_data/cases_synced && php admin.php init'`. Experts have to sign in again |
+| after tuning the algorithm | see section 2c: refresh the cases, deploy, `./host.sh admin rescore`, compare |
+| start a new campaign with an empty database | `./host.sh archive LABEL` (section 2c); the old answers are kept locally and on the host |
 | see who visited | Apache access log in `/srv/www/meteorologia.uib.es/logs/` (lines containing `/dana/`) |
 
 ### Good to know
@@ -201,6 +270,90 @@ answering. Always analyse the copy; never copy a local database back to the host
   time (for both SSH and the website, for several minutes). `host.sh` and the tests reuse a single
   connection. Avoid loops of separate `ssh` commands.
 - **Login cookie.** Signed, valid for 90 days, scoped to `/dana/`, and marked Secure over HTTPS.
+- **Code requests by email (`mode = "notify"`).** Requests are sent with PHP `mail()` through the
+  web host's Postfix, which relays via the university SMTP server and delivers inside UIB, from
+  `from_address` to `notify_address`. No password is stored anywhere. Limits: 3 emails per address per
+  day, 10 requests per visitor per hour, 60 emails per hour in total. A hidden field catches simple
+  bots, and the page never reveals whether an address already has a code.
+- **Why not email the code straight to experts?** That is `mode = "send"`, still in the code. The
+  university relay's IP is rejected by iCloud (`550 5.7.1 [HCM2]`), so external addresses cannot be
+  reached reliably from the host. Using a mailbox login instead (`transport = "smtp"`, stored with
+  `./host.sh set-smtp` in `dana_data/smtp_credentials.json`) was ruled out for now: Proton SMTP tokens
+  need a paid plan with a custom domain, a new Gmail account needs a phone, and an app password for a
+  personal Gmail would expose that whole mailbox if the host were compromised. An approved UIB sender
+  from IT would make `mode = "send"` possible.
+- **Privacy.** The site stores no email address. `code_requests` keeps name, institution, experience
+  and an HMAC-SHA256 fingerprint of the address; `request_log` keeps fingerprints of address and visitor
+  IP for 7 days, for the rate limits. The only copy of an address is the request email in the
+  organisers' inbox.
+- **Keep `dana_data/secret_key`.** It signs the login cookies and keys the fingerprints. If it is lost
+  or replaced, everyone has to sign in again and a repeat request creates a new code instead of
+  resending the old one.
+
+## 2c. After tuning the algorithm, or starting a new campaign
+
+The maps and the experts' answers (yes/no and clicks) do not depend on the algorithm; what the
+algorithm detects does (`cases/eval/`, `cases/overlays/`, categories, tags) and so does every
+outcome. Case ids are timestamps, so the same answers can be scored again against a tuned algorithm.
+
+### A. Tune and re-score the answers already collected (normal workflow)
+
+1. **Back up the answers:** `./host.sh pull-db data/archive/responses_before_<change>.sqlite`
+2. **Tune and re-run the tracking** (in the repository): edit `config.toml` (or the code in
+   `tracking/`), then `python COL_tracking_ERA5.py ...` so `data_tracking/col_z500_YYYY.nc` is rewritten.
+3. **Refresh the case pool** (from `expert_eval/`, AtmoTrack environment):
+   ```bash
+   python build_cases.py --refresh --high-impact high_impact_events.toml --jobs 16
+   ```
+   It rescans the tracking files (the scan cache notices the change), recomputes for **every existing
+   case** the algorithm objects, criteria, category, tags and overlay, and keeps case ids, maps and
+   the high-impact tags. The log shows how many cases changed category (e.g. `nocol_borderline ->
+   col_clear`) and the new **algorithm version** (a fingerprint of the thresholds, the last commit
+   touching `tracking/`, and the tracking files), stored in `cases/manifest.json`.
+   - Check the line `Criteria re-evaluation vs saved col_objects: 0/N records differ`. If the tuning
+     changed the *logic* of `tracking/col.py` (not only thresholds), `criteria.py` must be updated to
+     mirror it, otherwise that number is not 0 and the per-criterion diagnostics are wrong.
+   - A normal build (without `--refresh`) warns when the tracking output changed but the cases were
+     not refreshed.
+4. **Deploy and re-score on the host:**
+   ```bash
+   ./host.sh deploy
+   ./host.sh admin rescore
+   ```
+   `rescore` evaluates every stored answer against the refreshed cases. The original score of each
+   answer is kept in `response_scores` under the version it was made with, the new one is added, and
+   `responses` now holds the new score, so the site (summaries, disagreement-based sampling) and the
+   reports use the tuned algorithm. It prints how many outcomes changed (e.g. `algo_miss ->
+   agree_hit`). Running it again does nothing; `--force` recomputes anyway.
+5. **Compare old and new on the same answers:**
+   ```bash
+   ./host.sh pull-db
+   EXPERT_EVAL_DB=data/responses_host.sqlite python admin.py compare
+   ```
+   It shows, for the oldest and newest versions (`--old V --new V` to choose), agreement, expert
+   DANA maps detected, systems located, false alarms and outcome counts, the list of outcome changes
+   marked *better* / *worse*, and per-event agreement for the high-impact events. Unsure answers are
+   left out unless `--include-unsure`.
+
+Repeat 2–5 for each tuning step; every version stays in `response_scores`. For a local Flask site,
+`python admin.py rescore` does step 4 on the local database.
+
+### B. Start a new campaign (new question, box, period or pool)
+
+Use this when you change what experts are asked, not just the algorithm, so old and new answers are
+not mixed:
+
+```bash
+./host.sh archive campaign1                       # asks you to type the label to confirm
+mv cases cases_campaign1                           # keep the old pool locally
+python build_cases.py --high-impact high_impact_events.toml --target-total 1000 --jobs 16
+./host.sh deploy
+```
+
+`archive` copies the answers to `data/archive/responses_campaign1.sqlite`, renames the host's
+`dana_data` to `dana_data_campaign1` and starts an empty database, keeping `secret_key` and
+`flow_key` (so the Power Automate flow keeps working). Existing codes stop working; experts request a
+new one. `deploy` then replaces the maps and cases on the host with the new pool.
 
 ## 3. Analyse
 
@@ -215,6 +368,8 @@ python admin.py report                    # disagreement analysis printed to the
 python admin.py export responses.csv      # one row per answer
 python admin.py export-tuning tuning.csv  # one row per (answer, cyclone object) with all criteria
 python admin.py sweep                     # isolation threshold grid vs expert labels
+python admin.py high-impact --csv events.csv  # verdicts on the high-impact events
+python admin.py compare                   # algorithm versions compared on the same answers (section 2c)
 python admin.py list-codes                # invite codes, whether used, answers per code
 ```
 
@@ -253,8 +408,26 @@ The report prints these sections, in order:
 | **Expert systems the algorithm did not detect** | for every expert click not matched to an algorithm COL: the first failed criterion of the nearest tracked z500 cyclone (within 300 km), how often each criterion failed, and how many had no tracked cyclone at all | the criterion that fails most often is the first candidate for relaxing. `(nearest object is a COL: location offset)` means the algorithm found the system but the click fell outside its area. `no tracked z500 cyclone` points at the cyclone detection step (`[cy_acy_z500]`), not the COL criteria. `col_duration` often fails as a *consequence* of other failures, so look at the first failed criterion |
 | **Algorithm COLs: false alarms vs hits** | p10 / median / p90 of isolation margin, Δz margin (m), box margin (deg), poleward u200, z500 minimum (dam), area, COL lifetime and hours since onset / to decay, for COLs experts rejected (FA, maps answered "no") and COLs they confirmed (HIT) | where the FA distribution sits clearly below the HIT one (e.g. small isolation margins, short lifetimes, early onset), tightening that criterion should remove false alarms while keeping hits |
 | **Location** | distance from expert clicks to the algorithm's z500 minimum for matched and mismatched clicks, the share of mismatched clicks inside the COL's parent cyclone, and the distance to the nearest COL grid cell | mismatched clicks inside the parent cyclone, or within a few hundred km of the COL area, suggest the COL area is too small or the centre is placed on a different lobe, rather than a wrong detection |
+| **High-impact events** | one row per event in `high_impact_events.toml`: case time, algorithm result (COL or not), answers, % of experts saying DANA, % agreeing with the algorithm, % located inside the algorithm's area (when both saw a DANA), % unsure, the expert majority (DANA > 60 %, no DANA < 40 %, otherwise split) and whether the algorithm matches it; then a count of events where it does, events still short of answers, and reviewers' comments | these are the reference cases to agree on with the reviewers: an event the experts clearly call a DANA but the algorithm misses (or the other way round) weighs more than a random disagreement. `split` or high unsure means the event itself needs discussion before tuning on it |
 | **Post-session reviews** | per outcome: how many experts kept or would change their answer, and the reasons they picked | "would change" answers are weaker evidence against the algorithm. Frequent reasons (e.g. *Open trough* for false alarms) suggest which criterion to revisit |
 | **Most disputed cases** | case id and time, category, answers, disagreement %, outcome breakdown and tags | case ids are timestamps (`YYYYMMDDHH`). Look at them with `Plotting/plot_z500_t850_DANAS.py` or the frames in `cases/frames/` |
+
+### `compare`
+
+`python admin.py compare [--old V] [--new V] [--include-unsure]` compares two algorithm versions on
+the answers scored under both (section 2c). **agreement** is the share of `agree_hit` + `agree_null`;
+**expert DANA maps detected** is the share of maps where the expert saw a DANA and the algorithm
+detected one (anywhere); **expert systems located** is the share of expert centres inside an algorithm
+COL; **false alarms** is the share of the expert's "no DANA" maps where the algorithm detected one.
+Outcome changes towards `agree_hit`/`agree_null` are *better*, away from them *worse*; a tuning step is
+worth keeping when the better changes clearly outnumber the worse ones, especially on the high-impact
+events.
+
+### `high-impact`
+
+`python admin.py high-impact [--min-answers 3] [--csv events.csv]` prints the high-impact table on its
+own and optionally writes it as CSV (one row per event, including slide map times and all review
+comments), ready to share with reviewers. Events need `--min-answers` answers before a verdict is shown.
 
 ### `export responses.csv`
 

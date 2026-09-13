@@ -72,6 +72,43 @@ CREATE TABLE IF NOT EXISTS click_diagnostics (
     computed_at  TEXT NOT NULL,
     PRIMARY KEY (response_id, click_idx)
 );
+-- Each answer scored against each algorithm version (see admin.php / admin.py rescore). The
+-- responses table always holds the score for the version currently deployed.
+CREATE TABLE IF NOT EXISTS response_scores (
+    response_id   INTEGER NOT NULL REFERENCES responses(id),
+    algo_version  TEXT NOT NULL,
+    outcome       TEXT NOT NULL,
+    n_systems     INTEGER NOT NULL,
+    n_matched     INTEGER NOT NULL,
+    n_algo_missed INTEGER NOT NULL,
+    n_algo_extra  INTEGER NOT NULL,
+    click_details TEXT NOT NULL,
+    algo_details  TEXT NOT NULL,
+    scored_at     TEXT NOT NULL,
+    PRIMARY KEY (response_id, algo_version)
+);
+-- Code requests from the sign-in page. The email address is never stored: only an HMAC-SHA256
+-- fingerprint (keyed with dana_data/secret_key), enough to recognise a repeat request and resend
+-- the same code.
+CREATE TABLE IF NOT EXISTS code_requests (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    email_hash   TEXT NOT NULL UNIQUE,
+    code         TEXT NOT NULL UNIQUE REFERENCES invite_codes(code),
+    name         TEXT NOT NULL,
+    affiliation  TEXT,
+    experience   TEXT NOT NULL,
+    created_at   TEXT NOT NULL,
+    last_sent_at TEXT NOT NULL,
+    n_sent       INTEGER NOT NULL DEFAULT 1
+);
+-- One row per request attempt, for rate limiting (IP and email as keyed fingerprints only)
+CREATE TABLE IF NOT EXISTS request_log (
+    created_at  TEXT NOT NULL,
+    ip_hash     TEXT NOT NULL,
+    email_hash  TEXT,
+    sent        INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_request_log_time ON request_log(created_at);
 CREATE VIEW IF NOT EXISTS case_agreement AS
 SELECT c.case_id,
        c.category,
@@ -83,3 +120,5 @@ SELECT c.case_id,
        END                                                                AS disagree_rate
 FROM cases c LEFT JOIN responses r ON r.case_id = c.case_id
 GROUP BY c.case_id;
+-- bump when adding tables so existing databases are upgraded (see php/app/db.php)
+PRAGMA user_version = 3;

@@ -10,6 +10,8 @@
 
 declare(strict_types=1);
 
+const SCHEMA_VERSION = 3;  // keep equal to PRAGMA user_version at the end of schema.sql
+
 function ensure_data_dir(): void
 {
     if (!is_dir(DANA_DATA)) {
@@ -31,8 +33,8 @@ function db(): PDO
     ]);
     $pdo->exec('PRAGMA foreign_keys = ON');
     $pdo->exec('PRAGMA busy_timeout = 30000');
-    $exists = $pdo->query("SELECT COUNT(*) FROM sqlite_master WHERE name = 'case_agreement'")->fetchColumn();
-    if (!(int) $exists) {
+    // schema.sql is idempotent (CREATE ... IF NOT EXISTS) and ends with PRAGMA user_version = N
+    if ((int) $pdo->query('PRAGMA user_version')->fetchColumn() < SCHEMA_VERSION) {
         $pdo->exec((string) file_get_contents(DANA_SCHEMA));
     }
     return $pdo;
@@ -78,9 +80,17 @@ function sync_cases_if_needed(PDO $pdo, array $manifest, string $manifestPath, b
     $pdo->beginTransaction();
     try {
         $st = $pdo->prepare('INSERT INTO cases (case_id, time, category, tags, algo_n_cols) VALUES (?,?,?,?,?)');
+        $up = $pdo->prepare('UPDATE cases SET time = ?, category = ?, tags = ?, algo_n_cols = ? WHERE case_id = ?');
         foreach (array_keys($manifest['cases']) as $cid) {
             $cid = (string) $cid;
             if (isset($have[$cid])) {
+                if ($force) {  // full refresh (admin init): category/tags/detections may have changed
+                    $p = DANA_CASES . "/eval/$cid.json";
+                    if (is_file($p)) {
+                        $e = json_decode((string) file_get_contents($p), true);
+                        $up->execute([$e['time'], $e['category'], jenc($e['tags']), $e['algo_n_cols'], $cid]);
+                    }
+                }
                 continue;
             }
             $p = DANA_CASES . "/eval/$cid.json";

@@ -31,7 +31,7 @@ def load_settings(path=None):
 def server_settings_json(path=None):
     """Sections the PHP server needs, as JSON (written to settings.json on deploy)."""
     s = load_settings(path)
-    return json.dumps({k: s[k] for k in ("session", "sampling", "review")}, indent=1)
+    return json.dumps({k: s[k] for k in ("session", "sampling", "review", "email")}, indent=1)
 
 
 if __name__ == "__main__":  # python settings.py > settings.json

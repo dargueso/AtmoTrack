@@ -69,7 +69,9 @@ function draw_session(array $rows, int $nCases, array $exclude, array $settings)
         $tags = is_array($r['tags']) ? $r['tags'] : (json_decode((string) $r['tags'], true) ?: []);
         $strata[$r['category']][] = [
             'case_id' => $cid,
+            'category' => $r['category'],
             'tags' => $tags,
+            'n' => (int) ($r['n'] ?? 0),
             'weight' => case_weight((int) ($r['n'] ?? 0), (int) ($r['n_disagree'] ?? 0), (int) ($r['n_unsure'] ?? 0), $sp),
         ];
     }
@@ -77,6 +79,24 @@ function draw_session(array $rows, int $nCases, array $exclude, array $settings)
     $lo = (int) ceil($ss['min_pos_frac'] * $nCases - 1e-9);
     $hi = (int) floor($ss['max_pos_frac'] * $nCases + 1e-9);
     $nPos = mt_rand($lo, max($lo, $hi));
+
+    // high-impact share first (fewest answers most likely), then remove them from the strata
+    $poolHi = [];
+    foreach ($strata as $cs) {
+        foreach ($cs as $c) {
+            if (in_array('high_impact', $c['tags'], true)) {
+                $poolHi[] = ['weight' => 1.0 / (1 + $c['n'])] + $c;
+            }
+        }
+    }
+    $kHi = min((int) round($nCases * ($ss['high_impact_fraction'] ?? 0), 0, PHP_ROUND_HALF_EVEN), count($poolHi));
+    $hiCases = weighted_draw($poolHi, $kHi);
+    $hiIds = array_flip(array_column($hiCases, 'case_id'));
+    foreach ($strata as $cat => $cs) {
+        $strata[$cat] = array_values(array_filter($cs, fn($c) => !isset($hiIds[$c['case_id']])));
+    }
+    $hiPos = array_values(array_filter($hiCases, fn($c) => str_starts_with($c['category'], 'col_')));
+    $hiNeg = array_values(array_filter($hiCases, fn($c) => str_starts_with($c['category'], 'nocol_')));
 
     $drawClass = function (string $prefix, int $k, float $borderFrac) use ($strata): array {
         $kBorder = (int) round($k * $borderFrac, 0, PHP_ROUND_HALF_EVEN);
@@ -90,8 +110,8 @@ function draw_session(array $rows, int $nCases, array $exclude, array $settings)
         return array_merge($border, $clear);
     };
 
-    $pos = $drawClass('col', $nPos, (float) $ss['pos_borderline_frac']);
-    $neg = $drawClass('nocol', $nCases - $nPos, (float) $ss['neg_borderline_frac']);
+    $pos = array_merge($hiPos, $drawClass('col', max(0, $nPos - count($hiPos)), (float) $ss['pos_borderline_frac']));
+    $neg = array_merge($hiNeg, $drawClass('nocol', max(0, $nCases - $nPos - count($hiNeg)), (float) $ss['neg_borderline_frac']));
     $short = $nCases - count($pos) - count($neg);
     if ($short > 0) {  // one class ran out: fill from the other
         $taken = array_flip(array_column(array_merge($pos, $neg), 'case_id'));

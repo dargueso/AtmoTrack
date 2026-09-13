@@ -37,7 +37,17 @@ sys.path.insert(0, str(HERE))
 
 import evaluate  # noqa: E402
 from settings import server_settings_json  # noqa: E402
-from test_expert_eval import _pool, api_flow, cases_dir_or_skip  # noqa: E402
+from test_expert_eval import (  # noqa: E402
+    FakeSMTP,
+    _pool,
+    api_flow,
+    cases_dir_or_skip,
+    check_high_impact_draws,
+    check_smtp_delivery,
+    high_impact_pool,
+    parse_outbox,
+    smtp_settings,
+)
 
 
 def _free_port():
@@ -81,7 +91,8 @@ class LocalRunner:
         port = _free_port()
         env = {**os.environ, "DANA_APP_DIR": str(HERE / "php" / "app"), "DANA_CASES_DIR": str(self.cases_dir),
                "DANA_DATA_DIR": str(data), "DANA_SETTINGS": str(self.settings),
-               "DANA_SCHEMA": str(HERE / "schema.sql"), "DANA_COOKIE_PATH": "/"}  # fmt: skip
+               "DANA_SCHEMA": str(HERE / "schema.sql"), "DANA_COOKIE_PATH": "/",
+               "DANA_EMAIL_TEMPLATE": str(HERE / "email_code.txt"), "DANA_MAIL_OUTBOX": str(data / "outbox")}  # fmt: skip
         proc = subprocess.Popen([self.exe, "-S", f"127.0.0.1:{port}", str(HERE / "php" / "dev_router.php")],
                                 cwd=HERE, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)  # fmt: skip
         base = f"http://127.0.0.1:{port}/"
@@ -91,7 +102,11 @@ class LocalRunner:
             proc.terminate()
             proc.wait(timeout=10)
 
-        return base, str(data / "responses.sqlite"), stop
+        return base, str(data / "responses.sqlite"), str(data / "outbox"), stop
+
+    def read_outbox(self, outbox):
+        files = sorted(pathlib.Path(outbox).glob("*.eml")) if pathlib.Path(outbox).exists() else []
+        return [f.read_bytes() for f in files]
 
 
 class RemoteRunner:
@@ -127,7 +142,8 @@ class RemoteRunner:
         rport, lport = random.randint(30000, 60000), _free_port()
         env = {"DANA_APP_DIR": self.app, "DANA_CASES_DIR": self.cases_dir, "DANA_DATA_DIR": data,
                "DANA_SETTINGS": self.settings, "DANA_SCHEMA": f"{self.app}/schema.sql", "DANA_COOKIE_PATH": "/",
-               "DANA_STATIC_ROOT": self.public, "DANA_FRAMES_DIR": f"{self.public}/frames"}  # fmt: skip
+               "DANA_STATIC_ROOT": self.public, "DANA_FRAMES_DIR": f"{self.public}/frames",
+               "DANA_MAIL_OUTBOX": f"{data}/outbox"}  # fmt: skip
         exports = " ".join(f"{k}={shlex.quote(v)}" for k, v in env.items())
         cmd = (f"mkdir -p {data} && chmod 700 {data} && cd {self.app}/dev && "
                f"exec env {exports} timeout 900 php -S 127.0.0.1:{rport} dev_router.php")  # fmt: skip
@@ -144,7 +160,15 @@ class RemoteRunner:
                 check=False,
             )
 
-        return base, f"{data}/responses.sqlite", stop
+        return base, f"{data}/responses.sqlite", f"{data}/outbox", stop
+
+    def read_outbox(self, outbox):
+        import base64
+
+        out = self.run(
+            f'ls {shlex.quote(outbox)}/*.eml 2>/dev/null | sort | while read f; do base64 -w0 "$f"; echo; done'
+        )
+        return [base64.b64decode(line) for line in out.split()]
 
 
 @pytest.fixture(scope="module")
@@ -269,13 +293,18 @@ def test_sampler_php(runner):
     easy = sum(rows[1]["case_id"] in ids for ids, _ in draws)
     assert hard > 1.5 * easy
 
+    rows, hi_ids = high_impact_pool()
+    draws = runner.devtool({"cmd": "draw", "rows": rows, "n_cases": 10, "repeat": 2000}, env)
+    check_high_impact_draws([tuple(d) for d in draws], hi_ids)
+
 
 # ---------------------------------------------------------------------------
 # full API flow through php -S
 # ---------------------------------------------------------------------------
 class HttpClient:
-    def __init__(self, base, runner, db_path, eval_dir):
+    def __init__(self, base, runner, db_path, eval_dir, outbox_dir):
         self.base, self.runner, self.db_path, self.eval_dir = base, runner, db_path, eval_dir
+        self.outbox_dir = outbox_dir
         self.opener = urllib.request.build_opener(
             urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar())
         )
@@ -303,6 +332,9 @@ class HttpClient:
     def get_json(self, path):
         return json.loads(self.get(path)[1])
 
+    def outbox(self):
+        return parse_outbox(self.runner.read_outbox(self.outbox_dir))
+
     def query(self, sql, params=()):
         return self.runner.devtool(
             {"cmd": "sql", "db": self.db_path, "sql": sql, "params": list(params)}
@@ -314,14 +346,26 @@ class HttpClient:
 
 def test_api_flow_php(runner):
     cases_dir = cases_dir_or_skip()
-    base, db_path, stop = runner.start_server()
+    base, db_path, outbox_dir, stop = runner.start_server()
     try:
-        c = HttpClient(base, runner, db_path, cases_dir / "eval")
+        c = HttpClient(base, runner, db_path, cases_dir / "eval", outbox_dir)
         status, page = c.get("")
         assert status == 200 and b"DANA Expert Check" in page
         assert c.get("static/app.js")[0] == 200
         api_flow(c)
         assert c.get("api/nope")[0] == 404
+        # rescore on this PHP/SQLite: keeps the original score, re-scores for the deployed version
+        if runner.remote:
+            data = str(pathlib.PurePosixPath(db_path).parent)
+            n_resp = c.query("SELECT COUNT(*) AS n FROM responses")[0]["n"]
+            out = runner.run(f"cd {runner.app} && DANA_DATA_DIR={data} php admin.php rescore")
+            assert "no outcome changed" in out, out  # same cases: nothing may change
+            scored = c.query("SELECT COUNT(DISTINCT response_id) AS n FROM response_scores")[0]["n"]
+            assert scored == n_resp > 0, (scored, n_resp)  # every answer keeps a score row
+            out = runner.run(
+                f"cd {runner.app} && DANA_DATA_DIR={data} php admin.php rescore --force"
+            )
+            assert f"Re-scored {n_resp} of {n_resp}" in out and "no outcome changed" in out, out
         # the database created by PHP must stay readable by the Python analysis tools
         tables = {
             r["name"]
@@ -330,3 +374,42 @@ def test_api_flow_php(runner):
         assert {"responses", "reviews", "case_agreement", "click_diagnostics"} <= tables
     finally:
         stop()
+
+
+# ---------------------------------------------------------------------------
+# SMTP transport (local PHP only: the fake SMTP server runs on this machine)
+# ---------------------------------------------------------------------------
+def test_smtp_transport_php(tmp_path):
+    exe = os.environ.get("PHP_BIN") or shutil.which("php")
+    if not exe:
+        pytest.skip("no local PHP binary (set PHP_BIN)")
+    fake = FakeSMTP()
+    proc = None
+    try:
+        s, cred = smtp_settings(tmp_path, fake)
+        settings_json = tmp_path / "settings.json"
+        settings_json.write_text(
+            json.dumps({k: s[k] for k in ("session", "sampling", "review", "email")})
+        )
+        data = tmp_path / "data"
+        port = _free_port()
+        env = {**os.environ, "DANA_APP_DIR": str(HERE / "php" / "app"), "DANA_DATA_DIR": str(data),
+               "DANA_SETTINGS": str(settings_json), "DANA_SCHEMA": str(HERE / "schema.sql"),
+               "DANA_EMAIL_TEMPLATE": str(HERE / "email_code.txt"), "DANA_SMTP_CREDENTIALS": str(cred),
+               "DANA_COOKIE_PATH": "/"}  # fmt: skip
+        env.pop("DANA_MAIL_OUTBOX", None)
+        proc = subprocess.Popen([exe, "-S", f"127.0.0.1:{port}", str(HERE / "php" / "dev_router.php")],
+                                cwd=HERE, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)  # fmt: skip
+        base = f"http://127.0.0.1:{port}/"
+        _wait_http(base, proc)
+        (tmp_path / "runner").mkdir()
+        runner = LocalRunner(
+            exe, cases_dir_or_skip(), tmp_path / "runner"
+        )  # own dir: writes settings.json
+        c = HttpClient(base, runner, str(data / "responses.sqlite"), None, None)
+        check_smtp_delivery(fake, c.post, c.query)
+    finally:
+        fake.close()
+        if proc:
+            proc.terminate()
+            proc.wait(timeout=10)
