@@ -11,7 +11,6 @@ CREATE TABLE IF NOT EXISTS experts (
     auth        TEXT NOT NULL CHECK (auth IN ('code', 'profile')),
     code        TEXT UNIQUE,
     name        TEXT,
-    email       TEXT UNIQUE,
     affiliation TEXT,
     experience  TEXT,
     created_at  TEXT NOT NULL

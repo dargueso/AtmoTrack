@@ -17,7 +17,6 @@ set_exception_handler(function (Throwable $e) {
     }
 });
 
-const EMAIL_RE = '/^[^@\s]+@[^@\s]+\.[^@\s]+$/';
 const REASON_KEYS = [
     'algo_false_alarm' => 'reasons_false_alarm',
     'algo_miss' => 'reasons_miss',
@@ -150,21 +149,24 @@ function h_login(): void
             $eid = (int) $row['expert_id'];
         }
     } else {
-        $name = trim((string) ($b['name'] ?? ''));
-        $email = strtolower(trim((string) ($b['email'] ?? '')));
+        // no email is asked for or stored; a returning expert without a code is recognised
+        // by name + affiliation (case-insensitive), otherwise by the login cookie
+        $squash = fn($v) => trim((string) preg_replace('/\s+/u', ' ', (string) $v));
+        $name = $squash($b['name'] ?? '');
+        $affiliation = $squash($b['affiliation'] ?? '') ?: null;
         $experience = trim((string) ($b['experience'] ?? ''));
-        $affiliation = trim((string) ($b['affiliation'] ?? '')) ?: null;
-        if ($name === '' || !preg_match(EMAIL_RE, $email) || !in_array($experience, EXPERIENCE, true)) {
-            fail(400, 'Please give your name, a valid email and your experience');
+        if ($name === '' || !in_array($experience, EXPERIENCE, true)) {
+            fail(400, 'Please give your name and your experience');
         }
-        $row = q1($pdo, 'SELECT id FROM experts WHERE email = ?', [$email]);
+        $row = q1($pdo, "SELECT id FROM experts WHERE auth = 'profile' AND lower(name) = lower(?)
+                         AND lower(COALESCE(affiliation, '')) = lower(?) ORDER BY id LIMIT 1",
+            [$name, $affiliation ?? '']);
         if ($row) {
             $eid = (int) $row['id'];
-            qexec($pdo, 'UPDATE experts SET name = ?, affiliation = ?, experience = ? WHERE id = ?',
-                [$name, $affiliation, $experience, $eid]);
+            qexec($pdo, 'UPDATE experts SET experience = ? WHERE id = ?', [$experience, $eid]);
         } else {
-            qexec($pdo, "INSERT INTO experts (auth, name, email, affiliation, experience, created_at)
-                         VALUES ('profile', ?, ?, ?, ?, ?)", [$name, $email, $affiliation, $experience, now_iso()]);
+            qexec($pdo, "INSERT INTO experts (auth, name, affiliation, experience, created_at)
+                         VALUES ('profile', ?, ?, ?, ?)", [$name, $affiliation, $experience, now_iso()]);
             $eid = (int) $pdo->lastInsertId();
         }
     }

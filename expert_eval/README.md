@@ -61,7 +61,7 @@ python admin.py add-codes --n 5 --label AEMET
 python app.py                             # http://<host>:5050
 ```
 
-Experts sign in with **either** an invite code **or** their details (name, email, experience).
+Experts sign in with **either** an invite code **or** their details (name, affiliation, experience; no email is asked for or stored).
 For more than a handful of simultaneous users, serve with a WSGI server, e.g.
 `pip install waitress && waitress-serve --port 5050 app:app`.
 
@@ -149,7 +149,7 @@ test suite on the host (section Tests). It uses a throwaway database, not the li
 ```
 
 Codes must be created this way, on the host database. `python admin.py add-codes` only writes to a
-local database. Experts can also sign in without a code using their name, email and experience.
+local database. Experts can also sign in without a code using their name, affiliation and experience (no email). Signing in again with the same name and affiliation continues as the same expert.
 
 **6. Invite experts.** Send each one the link, their personal code and a short note, for example:
 

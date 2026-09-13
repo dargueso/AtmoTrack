@@ -32,7 +32,6 @@ S = load_settings()
 CASES_DIR = S["paths"]["cases_dir"]
 EVAL_DIR = CASES_DIR / "eval"
 EXPERIENCE = ("Operational forecaster", "Researcher", "Student / early career", "Other")
-EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 app = Flask(__name__, static_folder=None)
 
@@ -201,25 +200,26 @@ def login():
         else:
             eid = row["expert_id"]
     else:
-        name = (b.get("name") or "").strip()
-        email = (b.get("email") or "").strip().lower()
+        # no email is asked for or stored; a returning expert without a code is recognised
+        # by name + affiliation (case-insensitive), otherwise by the login cookie
+        name = " ".join((b.get("name") or "").split())
+        affiliation = " ".join((b.get("affiliation") or "").split()) or None
         experience = (b.get("experience") or "").strip()
-        if not name or not EMAIL_RE.match(email) or experience not in EXPERIENCE:
-            return jsonify(
-                {"error": "Please give your name, a valid email and your experience"}
-            ), 400
-        row = con.execute("SELECT id FROM experts WHERE email = ?", (email,)).fetchone()
+        if not name or experience not in EXPERIENCE:
+            return jsonify({"error": "Please give your name and your experience"}), 400
+        row = con.execute(
+            """SELECT id FROM experts WHERE auth = 'profile' AND lower(name) = lower(?)
+               AND lower(COALESCE(affiliation, '')) = lower(?) ORDER BY id LIMIT 1""",
+            (name, affiliation or ""),
+        ).fetchone()
         if row:
             eid = row["id"]
-            con.execute(
-                "UPDATE experts SET name = ?, affiliation = ?, experience = ? WHERE id = ?",
-                (name, (b.get("affiliation") or "").strip() or None, experience, eid),
-            )
+            con.execute("UPDATE experts SET experience = ? WHERE id = ?", (experience, eid))
         else:
             eid = con.execute(
-                """INSERT INTO experts (auth, name, email, affiliation, experience, created_at)
-                   VALUES ('profile', ?, ?, ?, ?, ?)""",
-                (name, email, (b.get("affiliation") or "").strip() or None, experience, db.now()),
+                """INSERT INTO experts (auth, name, affiliation, experience, created_at)
+                   VALUES ('profile', ?, ?, ?, ?)""",
+                (name, affiliation, experience, db.now()),
             ).lastrowid
         con.commit()
     session.permanent = True

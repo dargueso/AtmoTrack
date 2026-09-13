@@ -247,9 +247,16 @@ def api_flow(c):
     get_json(path), query(sql) -> list of dicts, execute(sql) and eval_dir."""
 
     assert c.post("api/session", {"n_cases": 10})[0] == 401
-    assert c.post("api/login", {"name": "Test", "email": "bad"})[0] == 400
+    assert c.post("api/login", {"name": "Test"})[0] == 400  # experience is required
+    assert c.post("api/login", {"name": " ", "experience": "Researcher"})[0] == 400
     status, r = c.post(
-        "api/login", {"name": "Test Expert", "email": "T@example.org", "experience": "Researcher"}
+        "api/login",
+        {
+            "name": "Test Expert",
+            "affiliation": "UIB",
+            "experience": "Researcher",
+            "email": "should-be-ignored@example.org",
+        },  # fmt: skip
     )
     assert status == 200
     assert c.get_json("api/config")["expert"]["label"] == "Test Expert"
@@ -321,3 +328,24 @@ def api_flow(c):
     r = c.post("api/login", {"code": "abcd-efgh"})[1]
     assert r["expert"]["label"] == "Lab-1" and r["expert"]["auth"] == "code"
     assert math.isfinite(summ["all_experts"]["agreement_rate"])
+
+    # no email anywhere: not a column, never stored
+    schema = c.query("SELECT sql FROM sqlite_master WHERE name = 'experts'")[0]["sql"]
+    assert "email" not in schema.lower()
+    # a returning expert without a code is recognised by name + affiliation (case/space-insensitive)
+    c.post("api/logout", {})
+    first_id = c.query("SELECT id FROM experts WHERE name = 'Test Expert'")[0]["id"]
+    again = c.post(
+        "api/login", {"name": "  test   EXPERT ", "affiliation": "uib", "experience": "Other"}
+    )[1]
+    assert again["expert"]["id"] == first_id
+    s2 = c.post("api/session", {"n_cases": 10})[1]
+    assert not answered & {
+        x["case_id"] for x in s2["cases"]
+    }  # already answered cases stay excluded
+    c.post("api/logout", {})
+    other = c.post(
+        "api/login", {"name": "Test Expert", "affiliation": "AEMET", "experience": "Other"}
+    )[1]
+    assert other["expert"]["id"] != first_id
+    assert len(c.query("SELECT id FROM experts WHERE auth = 'profile'")) == 2
