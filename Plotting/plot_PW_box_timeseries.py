@@ -84,10 +84,12 @@ def load_pw(datadir, year_start=None, year_end=None):
     # Normalise longitudes to [-180, 180) and make both axes ascending.
     pw = pw.assign_coords(lon=((pw.lon + 180) % 360) - 180).sortby("lon").sortby("lat")
 
-    pw = pw.sel(time=slice(
-        None if year_start is None else f"{year_start}-01-01",
-        None if year_end is None else f"{year_end}-12-31",
-    ))
+    pw = pw.sel(
+        time=slice(
+            None if year_start is None else f"{year_start}-01-01",
+            None if year_end is None else f"{year_end}-12-31",
+        )
+    )
     if pw.sizes["time"] == 0:
         raise SystemExit("No data left after applying the year range.")
     return pw.load()
@@ -108,7 +110,9 @@ def box_mean(pw, box):
             f"Box {box} is invalid or outside the data domain "
             f"(lat {lat.min()}–{lat.max()}, lon {lon.min()}–{lon.max()})."
         )
-    sub = pw.sel(lat=slice(box["lat_min"], box["lat_max"]), lon=slice(box["lon_min"], box["lon_max"]))
+    sub = pw.sel(
+        lat=slice(box["lat_min"], box["lat_max"]), lon=slice(box["lon_min"], box["lon_max"])
+    )
     if sub.sizes["lat"] == 0 or sub.sizes["lon"] == 0:
         raise SystemExit(f"Box {box} contains no grid points; make it larger.")
     weights = np.cos(np.deg2rad(sub.lat))
@@ -223,17 +227,25 @@ def parse_args():
         help="Plot deseasonalised anomalies instead of raw monthly means",
     )
     parser.add_argument(
-        "--datadir", default=cfg.data_era5, help="Input directory (default: data_era5 from config.toml)"
+        "--datadir",
+        default=cfg.data_era5,
+        help="Input directory (default: data_era5 from config.toml)",
     )
     parser.add_argument(
-        "--outdir", default=cfg.plots_dir, help="Output directory (default: plots_dir from config.toml)"
+        "--outdir",
+        default=cfg.plots_dir,
+        help="Output directory (default: plots_dir from config.toml)",
     )
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
-    box = BOX if args.box is None else dict(zip(("lat_min", "lat_max", "lon_min", "lon_max"), args.box))
+    box = (
+        BOX
+        if args.box is None
+        else dict(zip(("lat_min", "lat_max", "lon_min", "lon_max"), args.box))
+    )
 
     pw = load_pw(args.datadir, args.year_start, args.year_end)
     series = box_mean(pw, box)
