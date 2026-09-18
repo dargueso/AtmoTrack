@@ -21,6 +21,7 @@ min_pos_frac   = 0.4        # fraction of algorithm-COL cases per session (lower
 max_pos_frac   = 0.6        # (upper bound)
 pos_borderline_frac = 0.4   # among COL cases, share of borderline ones
 neg_borderline_frac = 0.6   # among non-COL cases, share of borderline ones
+high_impact_fraction = 0.1  # share of each session reserved for high-impact events (0 = no guarantee)
 
 [sampling]
 prior_alpha     = 1.0       # Beta prior on per-case disagreement rate
@@ -54,6 +55,28 @@ near_box_outside_deg   = 3.0
 fig_width_in  = 8.0
 fig_height_in = 10.0
 dpi           = 90
+
+[email]
+# "Request a code" on the sign-in page. The site creates the code at once and never stores the address.
+# mode "notify": the request (name, institution, experience, email, code) is emailed to notify_address,
+#   with Reply-To = the requester, and you reply with the code. Uses the web host's relay, which
+#   delivers inside UIB; no password is stored anywhere.
+# mode "send": the code is emailed straight to the expert. Needs a sender that external providers
+#   accept (iCloud rejects the UIB relay IP): transport "smtp" with a mailbox login stored on the host
+#   via ./host.sh set-smtp (dana_data/smtp_credentials.json), e.g. an approved UIB service account.
+mode           = "notify"
+notify_address = "d.argueso@uib.es"
+transport      = "mail"               # "mail" (host relay) or "smtp" (smtp_* settings + set-smtp)
+from_address   = "d.argueso@uib.es"   # empty with transport "smtp": the SMTP login
+from_name      = "DANA Expert Check"
+reply_to       = ""                   # mode "send" only; empty: same as from_address
+site_url       = "https://meteorologia.uib.es/dana/"
+smtp_host     = "smtp.gmail.com"
+smtp_port     = 587
+smtp_security = "starttls"            # "starttls", "ssl" (port 465) or "none" (tests only)
+max_per_email_per_day = 3             # code emails to one address per 24 h
+max_per_ip_per_hour   = 10            # request attempts from one visitor per hour
+max_total_per_hour    = 60            # all code emails per hour (abuse brake; Gmail allows ~500/day)
 
 [review]
 reasons_false_alarm = ["Not a closed circulation", "Open trough", "Too weak", "Centre outside the box", "Other"]

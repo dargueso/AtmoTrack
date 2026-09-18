@@ -1,0 +1,131 @@
+# High-impact DANA events: daily precipitation > 400 mm or catastrophic floods.
+# Source: DANASv3.pdf (Keynote), slides 11-26. `maps` are the ERA5 map times shown on the slides (UTC).
+#
+# build_cases.py --high-impact high_impact_events.toml adds one case per event. The case time is chosen
+# so that the expert's +/-24 h loop covers as many of the slide maps as possible (ties: the latest map).
+# Set `case_time` to override that choice. These cases are tagged "high_impact", appear in every
+# session (settings.toml [session] high_impact_fraction) and have their own section in admin.py report.
+
+[[event]]
+id = "1940-09"
+maps = ["1940-09-28T18"]
+
+[[event]]
+id = "1940-10"
+maps = ["1940-10-18T12"]
+
+[[event]]
+id = "1949-09"
+maps = ["1949-09-25T18", "1949-09-28T12"]
+
+[[event]]
+id = "1949-10"
+maps = ["1949-10-28T12"]
+
+[[event]]
+id = "1957-10"
+maps = ["1957-10-14T12"]
+
+[[event]]
+id = "1959-10"
+maps = ["1959-10-21T06", "1959-10-22T12"]
+
+[[event]]
+id = "1960-07/08"
+maps = ["1960-07-31T00", "1960-08-01T18"]
+
+[[event]]
+id = "1961-10"
+maps = ["1961-10-31T12"]
+
+[[event]]
+id = "1962-09"
+maps = ["1962-09-25T12"]
+
+[[event]]
+id = "1971-09"
+maps = ["1971-09-21T12"]
+
+[[event]]
+id = "1973-09"
+maps = ["1973-09-19T12"]
+
+[[event]]
+id = "1973-10"
+maps = ["1973-10-18T18"]
+
+[[event]]
+id = "1982-10"
+maps = ["1982-10-20T12"]
+
+[[event]]
+id = "1982-11"
+maps = ["1982-11-09T18", "1982-11-10T06"]
+
+[[event]]
+id = "1986-10"
+maps = ["1986-10-14T12"]
+
+[[event]]
+id = "1987-11"
+maps = ["1987-11-03T12", "1987-11-04T12"]
+
+[[event]]
+id = "1988-11"
+maps = ["1988-11-12T00", "1988-11-13T00"]
+
+[[event]]
+id = "1989-09"
+maps = ["1989-09-04T06", "1989-09-06T06", "1989-09-07T00"]
+
+[[event]]
+id = "1989-11"
+maps = ["1989-11-14T12"]
+
+[[event]]
+id = "1991-11"
+maps = ["1991-11-04T12"]
+
+[[event]]
+id = "1994-10"
+maps = ["1994-10-08T06", "1994-10-09T00", "1994-10-10T06"]
+
+[[event]]
+id = "1996-09"
+maps = ["1996-09-11T12"]
+
+[[event]]
+id = "1997-09"
+maps = ["1997-09-30T12"]
+
+[[event]]
+id = "2000-06"
+maps = ["2000-06-10T18"]
+
+[[event]]
+id = "2000-10"
+maps = ["2000-10-22T12"]
+
+[[event]]
+id = "2002-05"
+maps = ["2002-05-07T06"]
+
+[[event]]
+id = "2012-09"
+maps = ["2012-09-28T12"]
+
+[[event]]
+id = "2018-10"
+maps = ["2018-10-09T12"]
+
+[[event]]
+id = "2019-09"
+maps = ["2019-09-11T12"]
+
+[[event]]
+id = "2019-10"
+maps = ["2019-10-22T12"]
+
+[[event]]
+id = "2024-10"
+maps = ["2024-10-29T12"]

@@ -129,27 +129,42 @@ function drawMarkers(container, clicks, opts = {}) {
 // Sign-in
 // ---------------------------------------------------------------------------
 function setupSignin() {
-  $$(".tab").forEach((t) => t.addEventListener("click", () => {
-    $$(".tab").forEach((x) => x.classList.toggle("active", x === t));
-    $("#form-code").hidden = t.dataset.tab !== "code";
-    $("#form-profile").hidden = t.dataset.tab !== "profile";
+  const showTab = (name) => {
+    $$(".tab").forEach((x) => x.classList.toggle("active", x.dataset.tab === name));
+    $("#form-code").hidden = name !== "code";
+    $("#form-request").hidden = name !== "request";
     showError($("#signin-error"), null);
-  }));
-  const sel = $("#form-profile select[name=experience]");
+  };
+  $$(".tab").forEach((t) => t.addEventListener("click", () => { showTab(t.dataset.tab); $("#signin-ok").hidden = true; }));
+  $$("[data-goto]").forEach((a) => a.addEventListener("click", (ev) => { ev.preventDefault(); showTab(a.dataset.goto); }));
+  $$("[data-mode]").forEach((p) => { p.hidden = p.dataset.mode !== (state.config.request_mode || "send"); });
+  const sel = $("#form-request select[name=experience]");
   sel.innerHTML = `<option value="">Choose…</option>` +
     state.config.experience_options.map((o) => `<option>${o}</option>`).join("");
 
-  const submit = async (ev, payload) => {
+  $("#form-code").addEventListener("submit", async (ev) => {
     ev.preventDefault();
     try {
-      const r = await api("/api/login", payload);
+      const r = await api("api/login", { code: new FormData(ev.target).get("code") });
       onSignedIn(r.expert);
     } catch (err) { showError($("#signin-error"), err); }
-  };
-  $("#form-code").addEventListener("submit", (ev) =>
-    submit(ev, { code: new FormData(ev.target).get("code") }));
-  $("#form-profile").addEventListener("submit", (ev) =>
-    submit(ev, Object.fromEntries(new FormData(ev.target))));
+  });
+  $("#form-request").addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const btn = $("button[type=submit]", ev.target);
+    btn.disabled = true;
+    try {
+      const r = await api("api/request-code", Object.fromEntries(new FormData(ev.target)));
+      ev.target.reset();
+      showTab("code");
+      $("#signin-ok").textContent = r.message;
+      $("#signin-ok").hidden = false;
+    } catch (err) {
+      showError($("#signin-error"), err);
+    } finally {
+      btn.disabled = false;
+    }
+  });
 }
 
 function onSignedIn(expert) {
@@ -170,7 +185,7 @@ function onSignedIn(expert) {
 // ---------------------------------------------------------------------------
 async function startSession() {
   try {
-    const r = await api("/api/session", { n_cases: Number($("#n-cases").value) });
+    const r = await api("api/session", { n_cases: Number($("#n-cases").value) });
     state.sessionId = r.session_id;
     state.cases = r.cases;
     state.index = 0;
@@ -306,7 +321,7 @@ async function submitAnswer() {
   state.busy = true;
   updateAnswerUI();
   try {
-    await api("/api/answer", {
+    await api("api/answer", {
       session_id: state.sessionId,
       case_id: c.case_id,
       has_dana: state.hasDana,
@@ -336,7 +351,7 @@ async function submitAnswer() {
 async function endSession() {
   stopPlay();
   try {
-    const s = await api(`/api/session/${state.sessionId}/end`, {});
+    const s = await api(`api/session/${state.sessionId}/end`, {});
     clearProgress();
     renderSummary(s);
   } catch (err) {
@@ -428,7 +443,7 @@ function renderDisagreement(d) {
   $(".btn-save", node).addEventListener("click", async () => {
     const chk = $("input[type=radio]:checked", node);
     try {
-      await api("/api/review", {
+      await api("api/review", {
         response_id: d.response_id,
         changed: chk ? chk.value === "1" : null,
         reasons: Array.from(selected),
@@ -446,7 +461,7 @@ function renderDisagreement(d) {
 
 async function extendSession() {
   try {
-    const r = await api(`/api/session/${state.sessionId}/extend`, { n_cases: state.config.extend_by });
+    const r = await api(`api/session/${state.sessionId}/extend`, { n_cases: state.config.extend_by });
     state.cases = state.cases.concat(r.cases);
     state.index = r.offset;
     saveProgress();
@@ -462,7 +477,7 @@ async function extendSession() {
 // ---------------------------------------------------------------------------
 async function init() {
   try {
-    state.config = await api("/api/config");
+    state.config = await api("api/config");
   } catch (err) {
     document.querySelector("main").innerHTML = `<div class="card narrow"><h1>Not available</h1><p>${err.message}</p></div>`;
     return;
@@ -488,7 +503,7 @@ async function init() {
   $("#btn-finish").addEventListener("click", () => show("done"));
   $("#btn-again").addEventListener("click", () => onSignedIn(state.expert));
   $("#btn-logout").addEventListener("click", async () => {
-    await api("/api/logout", {});
+    await api("api/logout", {});
     state.expert = null;
     $("#who").textContent = "";
     show("signin");

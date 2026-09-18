@@ -8,6 +8,9 @@ admin.py — Manage and analyse the DANA expert evaluation database.
     python admin.py export-tuning tuning.csv          # one row per (answer, cyclone object / click)
     python admin.py report [--top 20]                 # disagreement analysis
     python admin.py sweep [--include-unsure]          # isolation-threshold sweep vs expert labels
+    python admin.py high-impact [--csv events.csv]    # expert verdicts on the high-impact events
+    python admin.py rescore [--force]                 # re-score answers against cases/ (local database)
+    python admin.py compare [--old V] [--new V]       # before/after tuning, on the same answers
 
 Standard library only (plus the generated cases/ folder for tuning exports).
 """
@@ -26,7 +29,7 @@ sys.path.insert(0, str(HERE))
 
 import db  # noqa: E402
 from criteria_names import CRITERIA_ORDER, DZ_QUANTILE_LEVELS  # noqa: E402
-from evaluate import AGREE, load_case  # noqa: E402
+from evaluate import AGREE, evaluate_answer, load_case  # noqa: E402
 from settings import load_settings  # noqa: E402
 
 S = load_settings()
@@ -392,6 +395,8 @@ def cmd_report(args):
         for (o, reason), v in sorted(rv.items()):
             print(f"   {o:20s} {reason:40s} {v}")
 
+    print_high_impact(c, args.min_answers)
+
     # most disputed cases
     print(f"\n## Most disputed cases (min {args.min_answers} answers)")
     agg = c.execute(
@@ -406,6 +411,264 @@ def cmd_report(args):
         oc = ", ".join(f"{k}:{v}" for k, v in per_case[a["case_id"]].most_common())
         print(f"{a['case_id']}  {a['time'][:13]}  {a['category']:17s} n={a['n']:3d} "
               f"disagree={100 * (a['disagree_rate'] or 0):3.0f}%  [{oc}]  tags={','.join(json.loads(a['tags']))}")  # fmt: skip
+
+
+# ---------------------------------------------------------------------------
+# High-impact events
+# ---------------------------------------------------------------------------
+def _pct(a, b):
+    return round(100 * a / b) if b else None
+
+
+def high_impact_rows(c):
+    """One row per high-impact event (manifest "high_impact"), with the expert verdicts so far."""
+    hi = manifest().get("high_impact", {})
+    cases = {
+        r["case_id"]: r for r in c.execute("SELECT case_id, time, category, algo_n_cols FROM cases")
+    }
+    per = defaultdict(list)
+    for r in c.execute(RESPONSE_SQL).fetchall():
+        if r["case_id"] in hi:
+            per[r["case_id"]].append(r)
+    out = []
+    for cid, info in sorted(hi.items()):
+        rs, case = per.get(cid, []), cases.get(cid)
+        n = len(rs)
+        yes = sum(r["has_dana"] for r in rs)
+        both = [r for r in rs if r["has_dana"] and r["algo_n_cols"]]
+        algo_col = bool(case and case["algo_n_cols"])
+        share = yes / n if n else None
+        majority = (
+            None if not n else ("DANA" if share > 0.6 else "no DANA" if share < 0.4 else "split")
+        )
+        out.append(
+            {
+                "event": info["event"],
+                "case_id": cid,
+                "case_time": case["time"][:13] if case else cid,
+                "slide_maps": " ".join(info.get("maps", [])),
+                "algorithm": "COL" if algo_col else "no COL",
+                "category": case["category"] if case else None,
+                "answers": n,
+                "experts_dana_pct": _pct(yes, n),
+                "agree_pct": _pct(sum(r["outcome"] in AGREE for r in rs), n),
+                "located_pct": _pct(sum(r["n_matched"] > 0 for r in both), len(both)),
+                "unsure_pct": _pct(sum(r["unsure"] for r in rs), n),
+                "expert_majority": majority,
+                "algo_matches_majority": (
+                    None if majority in (None, "split") else (majority == "DANA") == algo_col
+                ),
+                "reviews": sum(r["review_reasons"] is not None for r in rs),
+                "comments": " | ".join(r["review_comment"] for r in rs if r["review_comment"]),
+            }
+        )
+    return out
+
+
+def print_high_impact(c, min_answers=2):
+    rows = high_impact_rows(c)
+    if not rows:
+        return
+    fmt = lambda v: "-" if v is None else f"{v}%"  # noqa: E731
+    print(
+        f"\n## High-impact events ({len(rows)} events; answers needed for a verdict: {min_answers})"
+    )
+    print(f"{'event':11s} {'case time':14s} {'algorithm':9s} {'answers':>7s} {'DANA':>5s} {'agree':>6s} "
+          f"{'located':>7s} {'unsure':>6s}  majority  algo=majority")  # fmt: skip
+    for r in rows:
+        ok = r["algo_matches_majority"] if r["answers"] >= min_answers else None
+        print(f"{r['event']:11s} {r['case_time']:14s} {r['algorithm']:9s} {r['answers']:7d} "
+              f"{fmt(r['experts_dana_pct']):>5s} {fmt(r['agree_pct']):>6s} {fmt(r['located_pct']):>7s} "
+              f"{fmt(r['unsure_pct']):>6s}  {(r['expert_majority'] or '-'):8s}  "
+              f"{'-' if ok is None else 'yes' if ok else 'NO'}")  # fmt: skip
+    judged = [
+        r for r in rows if r["answers"] >= min_answers and r["algo_matches_majority"] is not None
+    ]
+    print(f"algorithm matches the expert majority on {sum(r['algo_matches_majority'] for r in judged)}"
+          f"/{len(judged)} events with a clear majority; "
+          f"{sum(r['answers'] < min_answers for r in rows)} events still need answers")  # fmt: skip
+    for r in rows:
+        if r["comments"]:
+            print(f"   {r['event']}: {r['comments']}")
+
+
+def cmd_high_impact(args):
+    c = con()
+    print_high_impact(c, args.min_answers)
+    if args.csv:
+        rows = high_impact_rows(c)
+        with open(args.csv, "w", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=list(rows[0]) if rows else ["event"])
+            w.writeheader()
+            w.writerows(rows)
+        print(f"Wrote {len(rows)} events to {args.csv}")
+
+
+# ---------------------------------------------------------------------------
+# Algorithm versions: re-score and compare
+# ---------------------------------------------------------------------------
+SCORE_COLS = (
+    "outcome",
+    "n_systems",
+    "n_matched",
+    "n_algo_missed",
+    "n_algo_extra",
+    "click_details",
+    "algo_details",
+)
+
+
+def cmd_rescore(args):
+    """Same as `php admin.php rescore` on the host, for a local (Flask) database."""
+    c = con()
+    ver = manifest().get("algo_version") or "unversioned"
+    have = defaultdict(set)
+    for x in c.execute("SELECT response_id, algo_version FROM response_scores"):
+        have[x["response_id"]].add(x["algo_version"])
+    rows = c.execute(
+        """SELECT r.*, s.algo_version AS session_version FROM responses r
+           JOIN sessions s ON s.id = r.session_id ORDER BY r.case_id, r.id"""
+    ).fetchall()
+    ins = f"""INSERT OR REPLACE INTO response_scores (response_id, algo_version, {", ".join(SCORE_COLS)}, scored_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
+    changes, done = Counter(), 0
+    for r in rows:
+        if not have[r["id"]]:
+            orig = (json.loads(r["session_version"] or "{}") or {}).get("version") or "initial"
+            c.execute(ins, (r["id"], orig, *[r[k] for k in SCORE_COLS], r["created_at"]))
+            have[r["id"]].add(orig)
+        if ver in have[r["id"]] and not args.force:
+            continue
+        case = load_case(S["paths"]["cases_dir"] / "eval", r["case_id"])
+        res = evaluate_answer(case, bool(r["has_dana"]), json.loads(r["clicks"]))
+        vals = [
+            res[k] if k not in ("click_details", "algo_details") else json.dumps(res[k])
+            for k in SCORE_COLS
+        ]
+        c.execute(ins, (r["id"], ver, *vals, db.now()))
+        c.execute(
+            f"UPDATE responses SET {', '.join(k + ' = ?' for k in SCORE_COLS)} WHERE id = ?",
+            (*vals, r["id"]),
+        )
+        if res["outcome"] != r["outcome"]:
+            changes[f"{r['outcome']} -> {res['outcome']}"] += 1
+        done += 1
+    c.commit()
+    print(f"Re-scored {done} of {len(rows)} answers for algorithm version {ver}")
+    for k, v in sorted(changes.items()):
+        print(f"  {k:40s} {v}")
+    if not changes:
+        print("  no outcome changed")
+
+
+def _version_scores(c):
+    """{version: {response_id: score row}}, versions in the order they were first scored."""
+    scores, first = defaultdict(dict), {}
+    q = """SELECT x.*, r.has_dana, r.case_id, r.unsure, cs.tags FROM response_scores x
+           JOIN responses r ON r.id = x.response_id JOIN cases cs ON cs.case_id = r.case_id"""
+    for x in c.execute(q):
+        scores[x["algo_version"]][x["response_id"]] = x
+        first[x["algo_version"]] = min(first.get(x["algo_version"], x["scored_at"]), x["scored_at"])
+    # answers never re-scored: their only score is the one in responses
+    q = """SELECT r.*, r.id AS response_id, s.algo_version AS session_version, cs.tags, r.created_at AS scored_at
+           FROM responses r JOIN sessions s ON s.id = r.session_id JOIN cases cs ON cs.case_id = r.case_id
+           WHERE r.id NOT IN (SELECT response_id FROM response_scores)"""
+    for r in c.execute(q):
+        v = (json.loads(r["session_version"] or "{}") or {}).get("version") or "initial"
+        scores[v][r["response_id"]] = r
+        first[v] = min(first.get(v, r["scored_at"]), r["scored_at"])
+    return {v: scores[v] for v in sorted(scores, key=first.get)}
+
+
+PCT_KEYS = {
+    "agreement",
+    "expert DANA maps detected",
+    "expert systems located",
+    "false alarms on expert no-DANA maps",
+}
+
+
+def _summary(rows):
+    n = len(rows)
+    yes = [r for r in rows if r["has_dana"]]
+    no = [r for r in rows if not r["has_dana"]]
+    oc = Counter(r["outcome"] for r in rows)
+    return {
+        "answers": n,
+        "agreement": _pct(oc["agree_hit"] + oc["agree_null"], n),
+        "expert DANA maps detected": _pct(
+            sum(r["outcome"] in ("agree_hit", "partial_match", "location_mismatch") for r in yes),
+            len(yes),
+        ),
+        "expert systems located": _pct(
+            sum(r["n_matched"] for r in yes), sum(r["n_systems"] for r in yes)
+        ),
+        "false alarms on expert no-DANA maps": _pct(oc["algo_false_alarm"], len(no)),
+        **{
+            o: oc[o]
+            for o in (
+                "agree_hit",
+                "partial_match",
+                "location_mismatch",
+                "algo_miss",
+                "algo_false_alarm",
+                "agree_null",
+            )
+        },
+    }
+
+
+def cmd_compare(args):
+    c = con()
+    versions = _version_scores(c)
+    if len(versions) < 2 and not (args.old and args.new):
+        print(f"Only one algorithm version scored so far: {list(versions) or 'none'}. "
+              "Refresh the cases, deploy and run rescore first.")  # fmt: skip
+        return
+    old = args.old or list(versions)[0]
+    new = args.new or list(versions)[-1]
+    common = sorted(set(versions[old]) & set(versions[new]))
+    if args.include_unsure is False:
+        common = [i for i in common if not versions[new][i]["unsure"]]
+    a = _summary([versions[old][i] for i in common])
+    b = _summary([versions[new][i] for i in common])
+    print(f"# Algorithm {old} -> {new} on the same {len(common)} answers"
+          f" (unsure {'included' if args.include_unsure else 'excluded'})\n")  # fmt: skip
+    print(f"{'':40s} {old:>12s} {new:>12s}")
+    for k in a:
+        va, vb = a[k], b[k]
+        unit = "%" if k in PCT_KEYS else ""
+        print(
+            f"{k:40s} {('-' if va is None else f'{va}{unit}'):>12s} {('-' if vb is None else f'{vb}{unit}'):>12s}"
+        )
+    trans = Counter(
+        (versions[old][i]["outcome"], versions[new][i]["outcome"])
+        for i in common
+        if versions[old][i]["outcome"] != versions[new][i]["outcome"]
+    )
+    print("\n## Outcome changes (better = towards agree_hit / agree_null)")
+    for (o1, o2), n in trans.most_common():
+        mark = (
+            "better"
+            if o2 in AGREE and o1 not in AGREE
+            else "worse"
+            if o1 in AGREE and o2 not in AGREE
+            else ""
+        )
+        print(f"  {o1:18s} -> {o2:18s} {n:5d}  {mark}")
+    if not trans:
+        print("  none")
+    hi = manifest().get("high_impact", {})
+    if hi:
+        print("\n## High-impact events: agreement with the experts")
+        print(f"{'event':11s} {'answers':>7s} {old:>12s} {new:>12s}")
+        for cid, info in sorted(hi.items()):
+            ids = [i for i in common if versions[new][i]["case_id"] == cid]
+            ag = lambda v: _pct(sum(versions[v][i]["outcome"] in AGREE for i in ids), len(ids))  # noqa: E731
+            fa, fb = ag(old), ag(new)
+            print(
+                f"{info['event']:11s} {len(ids):7d} {('-' if fa is None else f'{fa}%'):>12s} {('-' if fb is None else f'{fb}%'):>12s}"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -512,6 +775,20 @@ def main():
     a.add_argument("--top", type=int, default=20)
     a.add_argument("--min-answers", type=int, default=2)
     a.set_defaults(func=cmd_report)
+    a = sub.add_parser("high-impact", help="expert verdicts on the high-impact events")
+    a.add_argument("--csv", default=None)
+    a.add_argument("--min-answers", type=int, default=3)
+    a.set_defaults(func=cmd_high_impact)
+    a = sub.add_parser(
+        "rescore", help="re-score answers against the cases/ algorithm version (local DB)"
+    )
+    a.add_argument("--force", action="store_true")
+    a.set_defaults(func=cmd_rescore)
+    a = sub.add_parser("compare", help="compare two algorithm versions on the same answers")
+    a.add_argument("--old", default=None)
+    a.add_argument("--new", default=None)
+    a.add_argument("--include-unsure", action="store_true")
+    a.set_defaults(func=cmd_compare)
     a = sub.add_parser("sweep", help="isolation threshold sweep against expert labels")
     a.add_argument("--include-unsure", action="store_true")
     a.add_argument(

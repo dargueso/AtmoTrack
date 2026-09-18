@@ -1,0 +1,19 @@
+<!doctype html>
+<html><body style="font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #1d2330;">
+<p><strong>New code request for the DANA Expert Check</strong>{repeat_note}</p>
+<table cellpadding="4" style="border-collapse: collapse;">
+<tr><td><b>Name</b></td><td>{name}</td></tr>
+<tr><td><b>Institution</b></td><td>{affiliation}</td></tr>
+<tr><td><b>Experience</b></td><td>{experience}</td></tr>
+<tr><td><b>Email</b></td><td>{email}</td></tr>
+<tr><td><b>Code</b></td><td>{code}</td></tr>
+</table>
+<p>If the Power Automate flow is running, the code below has already been sent to the requester from this
+mailbox and this message was moved to the requests folder. Otherwise press Reply (it goes to the requester)
+and send the text below.</p>
+<hr>
+{reply_html}
+<hr>
+<p style="color: #888888; font-size: 11px;">The site does not store the email address; this message is the only copy.<br>
+Automation data, do not edit: [DANA-KEY]{flow_key}[/DANA-KEY] [DANA-TO]{to_b64}[/DANA-TO] [DANA-BODY]{body_b64}[/DANA-BODY]</p>
+</body></html>

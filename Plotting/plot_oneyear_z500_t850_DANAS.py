@@ -34,18 +34,14 @@ parser.add_argument("year", type=str, help="Year in YYYY format, e.g. 1987")
 parser.add_argument(
     "--input",
     default=None,
-    help="Input netCDF file (default: DATA_TRACKING/era5_daily_col_z500_YEAR.nc)",
+    help="Input netCDF file (default: DATA_TRACKING/col_z500_YEAR.nc)",
 )
 parser.add_argument(
     "--output-dir", default=None, dest="output_dir", help="Output directory (default: YEAR)"
 )
 args = parser.parse_args()
 
-filein = (
-    args.input
-    if args.input is not None
-    else f"{cfg.data_tracking}/era5_daily_col_z500_{args.year}.nc"
-)
+filein = args.input if args.input is not None else f"{cfg.data_tracking}/col_z500_{args.year}.nc"
 folder = args.output_dir if args.output_dir is not None else str(args.year)
 if not os.path.exists(folder):
     os.makedirs(folder)

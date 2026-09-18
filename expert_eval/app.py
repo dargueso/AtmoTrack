@@ -10,13 +10,23 @@ Needs only Flask + the generated cases/ folder. Answers are stored in SQLite
 """
 
 import argparse
+import base64
+import datetime as dt
+import hashlib
+import hmac
+import html
 import json
+import os
 import pathlib
 import random
 import re
 import secrets
+import smtplib
 import sys
+import time
 from datetime import timedelta
+from email.message import EmailMessage
+from email.utils import formataddr
 
 from flask import Flask, abort, g, jsonify, request, send_from_directory, session
 
@@ -32,7 +42,6 @@ S = load_settings()
 CASES_DIR = S["paths"]["cases_dir"]
 EVAL_DIR = CASES_DIR / "eval"
 EXPERIENCE = ("Operational forecaster", "Researcher", "Student / early career", "Other")
-EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 app = Flask(__name__, static_folder=None)
 
@@ -174,6 +183,7 @@ def config():
             "default_cases": S["session"]["default_cases"],
             "extend_by": S["session"]["extend_by"],
             "experience_options": EXPERIENCE,
+            "request_mode": S["email"].get("mode", "send"),
             "expert": expert_public(ex) if ex else None,
         }
     )
@@ -184,47 +194,244 @@ def login():
     b = body()
     con = get_db()
     code = (b.get("code") or "").strip().upper()
-    if code:
-        row = con.execute("SELECT * FROM invite_codes WHERE code = ?", (code,)).fetchone()
-        if row is None:
-            return jsonify({"error": "Unknown invite code"}), 400
-        if row["expert_id"] is None:
-            cur = con.execute(
-                "INSERT INTO experts (auth, code, name, created_at) VALUES ('code', ?, ?, ?)",
-                (code, row["label"], db.now()),
-            )
-            con.execute(
-                "UPDATE invite_codes SET expert_id = ? WHERE code = ?", (cur.lastrowid, code)
-            )
-            con.commit()
-            eid = cur.lastrowid
-        else:
-            eid = row["expert_id"]
-    else:
-        name = (b.get("name") or "").strip()
-        email = (b.get("email") or "").strip().lower()
-        experience = (b.get("experience") or "").strip()
-        if not name or not EMAIL_RE.match(email) or experience not in EXPERIENCE:
-            return jsonify(
-                {"error": "Please give your name, a valid email and your experience"}
-            ), 400
-        row = con.execute("SELECT id FROM experts WHERE email = ?", (email,)).fetchone()
-        if row:
-            eid = row["id"]
-            con.execute(
-                "UPDATE experts SET name = ?, affiliation = ?, experience = ? WHERE id = ?",
-                (name, (b.get("affiliation") or "").strip() or None, experience, eid),
-            )
-        else:
-            eid = con.execute(
-                """INSERT INTO experts (auth, name, email, affiliation, experience, created_at)
-                   VALUES ('profile', ?, ?, ?, ?, ?)""",
-                (name, email, (b.get("affiliation") or "").strip() or None, experience, db.now()),
-            ).lastrowid
+    if not code:
+        return jsonify({"error": "Please enter your invite code"}), 400
+    row = con.execute("SELECT * FROM invite_codes WHERE code = ?", (code,)).fetchone()
+    if row is None:
+        return jsonify({"error": "Unknown invite code"}), 400
+    if row["expert_id"] is None:
+        # first use: the expert takes the details given when the code was requested, if any
+        req = con.execute(
+            "SELECT name, affiliation, experience FROM code_requests WHERE code = ?", (code,)
+        ).fetchone()
+        cur = con.execute(
+            """INSERT INTO experts (auth, code, name, affiliation, experience, created_at)
+               VALUES ('code', ?, ?, ?, ?, ?)""",
+            (
+                code,
+                req["name"] if req else row["label"],
+                req["affiliation"] if req else None,
+                req["experience"] if req else None,
+                db.now(),
+            ),
+        )
+        con.execute("UPDATE invite_codes SET expert_id = ? WHERE code = ?", (cur.lastrowid, code))
         con.commit()
+        eid = cur.lastrowid
+    else:
+        eid = row["expert_id"]
     session.permanent = True
     session["expert_id"] = eid
     return jsonify({"expert": expert_public(current_expert())})
+
+
+REQUEST_OK = (
+    "Thank you. If the address is valid, your code is on its way: "
+    "please check your inbox (and the spam folder)."
+)
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def fingerprint(value):
+    """Keyed HMAC-SHA256, so emails and IPs are never stored in clear."""
+    return hmac.new(app.config["SECRET_KEY"].encode(), value.encode(), hashlib.sha256).hexdigest()
+
+
+def iso_ago(seconds):
+    t = dt.datetime.now(dt.timezone.utc) - dt.timedelta(seconds=seconds)  # noqa: UP017
+    return t.isoformat(timespec="seconds")
+
+
+def new_invite_code(con):
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    while True:
+        code = "-".join("".join(secrets.choice(alphabet) for _ in range(4)) for _ in range(2))
+        if not con.execute("SELECT 1 FROM invite_codes WHERE code = ?", (code,)).fetchone():
+            return code
+
+
+def send_mail(to, subject, text, reply_to=None, html_body=False):
+    """Transport per settings [email]; with DANA_MAIL_OUTBOX set, write the message there (tests)."""
+    cfg = S["email"]
+    cred = None
+    cred_path = pathlib.Path(
+        os.environ.get("DANA_SMTP_CREDENTIALS")
+        or S["paths"]["db_path"].parent / "smtp_credentials.json"
+    )
+    if cred_path.exists():
+        cred = json.loads(cred_path.read_text())
+    sender = cfg.get("from_address") or (cred or {}).get("username", "") or "site@localhost"
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = formataddr((cfg["from_name"], sender))
+    msg["Reply-To"] = reply_to or cfg.get("reply_to") or sender
+    msg["To"] = to
+    msg.set_content(text, subtype="html" if html_body else "plain")
+    outbox = os.environ.get("DANA_MAIL_OUTBOX")
+    if outbox:
+        pathlib.Path(outbox).mkdir(parents=True, exist_ok=True)
+        (pathlib.Path(outbox) / f"{time.time():.6f}-{secrets.token_hex(3)}.eml").write_bytes(
+            bytes(msg)
+        )
+        return
+    if cfg.get("transport", "mail") == "mail":  # local relay, as PHP mail() on the host
+        with smtplib.SMTP("localhost", 25, timeout=30) as smtp:
+            smtp.send_message(msg)
+        return
+    security = cfg.get("smtp_security", "starttls")
+    cls = smtplib.SMTP_SSL if security == "ssl" else smtplib.SMTP
+    with cls(cfg["smtp_host"], cfg["smtp_port"], timeout=30) as smtp:
+        if security == "starttls":
+            smtp.starttls()
+        if not cred:
+            raise RuntimeError(f"SMTP credentials missing ({cred_path})")
+        smtp.login(cred["username"], cred["password"])
+        smtp.send_message(msg)
+
+
+def fill(template, values):
+    text = (HERE / template).read_text()
+    for key, val in values.items():
+        text = text.replace("{" + key + "}", str(val))
+    return text
+
+
+def send_code_email(to, name, code):
+    """mode "send": the code goes straight to the expert."""
+    cfg = S["email"]
+    text = fill("email_code.txt", {"name": name, "code": code, "site_url": cfg["site_url"],
+                                   "from_name": cfg["from_name"]})  # fmt: skip
+    send_mail(to, "Your DANA Expert Check code", text)
+
+
+def flow_key():
+    """Secret included in request emails so a Power Automate flow only acts on genuine ones."""
+    p = S["paths"]["db_path"].parent / "flow_key"
+    if not p.exists():
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(secrets.token_hex(16))
+        p.chmod(0o600)
+    return p.read_text().strip()
+
+
+def send_request_notification(email, name, affiliation, experience, code, n_sent):
+    """mode "notify": HTML request email to the organisers (Reply-To = requester) with an encoded
+    block for the Power Automate flow."""
+    cfg = S["email"]
+    esc = html.escape
+    reply = fill(
+        "email_reply.html", {"name": esc(name), "code": esc(code), "site_url": esc(cfg["site_url"])}
+    )
+    repeat = esc(f" (repeat request #{n_sent}: same code as before)") if n_sent > 1 else ""
+    text = fill("email_request.html", {
+        "repeat_note": repeat, "name": esc(name), "affiliation": esc(affiliation),
+        "experience": esc(experience), "email": esc(email), "code": esc(code), "reply_html": reply,
+        "flow_key": flow_key(), "to_b64": base64.b64encode(email.encode()).decode(),
+        "body_b64": base64.b64encode(reply.encode()).decode(),
+    })  # fmt: skip
+    subject = f"DANA Expert Check: code request from {name} ({affiliation})" + (
+        " [repeat]" if n_sent > 1 else ""
+    )
+    send_mail(cfg["notify_address"], subject, text, reply_to=email, html_body=True)
+
+
+def request_ok_message():
+    if S["email"].get("mode", "send") == "notify":
+        return "Thank you. We have received your request and will email you your personal code shortly."
+    return REQUEST_OK
+
+
+@app.post("/api/request-code")
+def request_code():
+    """Email a personal code. The address is only used to send it; a fingerprint is stored."""
+    b = body()
+    if (b.get("website") or "").strip():  # hidden spam-trap field
+        return jsonify({"ok": True, "message": request_ok_message()})
+    name = " ".join(str(b.get("name") or "").split())
+    affiliation = " ".join(str(b.get("affiliation") or "").split())
+    experience = str(b.get("experience") or "").strip()
+    email = str(b.get("email") or "").strip().lower()
+    if (
+        not name
+        or not affiliation
+        or experience not in EXPERIENCE
+        or len(name) > 120
+        or len(affiliation) > 200
+    ):
+        return jsonify({"error": "Please give your name, institution and experience"}), 400
+    if len(email) > 254 or not EMAIL_RE.match(email):
+        return jsonify({"error": "Please give a valid email address"}), 400
+
+    cfg = S["email"]
+    con = get_db()
+    ip = (
+        (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+        or request.remote_addr
+        or ""
+    )
+    ip_hash, email_hash = fingerprint("ip:" + ip), fingerprint("email:" + email)
+
+    def count(sql, params):
+        return con.execute(sql, params).fetchone()[0]
+
+    con.execute("DELETE FROM request_log WHERE created_at < ?", (iso_ago(7 * 86400),))
+    limited = (
+        count("SELECT COUNT(*) FROM request_log WHERE ip_hash = ? AND created_at >= ?",
+              (ip_hash, iso_ago(3600))) >= cfg["max_per_ip_per_hour"]
+        or count("SELECT COUNT(*) FROM request_log WHERE email_hash = ? AND sent = 1 AND created_at >= ?",
+                 (email_hash, iso_ago(86400))) >= cfg["max_per_email_per_day"]
+        or count("SELECT COUNT(*) FROM request_log WHERE sent = 1 AND created_at >= ?",
+                 (iso_ago(3600),)) >= cfg["max_total_per_hour"]
+    )  # fmt: skip
+    con.execute(
+        "INSERT INTO request_log (created_at, ip_hash, email_hash, sent) VALUES (?, ?, ?, 0)",
+        (db.now(), ip_hash, email_hash),
+    )
+    con.commit()
+    if limited:
+        return jsonify({"error": "Too many requests. Please try again later."}), 429
+
+    try:
+        existing = con.execute(
+            """SELECT id, code, name, affiliation, experience, n_sent FROM code_requests
+               WHERE email_hash = ?""",
+            (email_hash,),
+        ).fetchone()
+        if existing:
+            code, greet = existing["code"], existing["name"]
+            affiliation, experience = existing["affiliation"] or "", existing["experience"]
+            n_sent = existing["n_sent"] + 1
+            con.execute(
+                "UPDATE code_requests SET last_sent_at = ?, n_sent = n_sent + 1 WHERE id = ?",
+                (db.now(), existing["id"]),
+            )
+        else:
+            code, greet, n_sent = new_invite_code(con), name, 1
+            con.execute(
+                "INSERT INTO invite_codes (code, label, created_at) VALUES (?, ?, ?)",
+                (code, name, db.now()),
+            )
+            con.execute(
+                """INSERT INTO code_requests (email_hash, code, name, affiliation, experience,
+                       created_at, last_sent_at, n_sent) VALUES (?, ?, ?, ?, ?, ?, ?, 1)""",
+                (email_hash, code, name, affiliation, experience, db.now(), db.now()),
+            )
+        if S["email"].get("mode", "send") == "notify":
+            send_request_notification(email, greet, affiliation, experience, code, n_sent)
+        else:
+            send_code_email(email, greet, code)
+        con.execute(
+            "INSERT INTO request_log (created_at, ip_hash, email_hash, sent) VALUES (?, ?, ?, 1)",
+            (db.now(), ip_hash, email_hash),
+        )
+        con.commit()
+    except Exception as e:
+        con.rollback()
+        app.logger.error("code request failed: %s", e)
+        return jsonify(
+            {"error": "We could not send the email right now. Please try again later."}
+        ), 500  # fmt: skip
+    return jsonify({"ok": True, "message": request_ok_message()})
 
 
 @app.post("/api/logout")
@@ -241,7 +448,7 @@ def _case_payload(m, cid):
     return {
         "case_id": cid,
         "month": c["month"],
-        "frames": [f"/frames/{f}.png" for f in c["frames"]],
+        "frames": [f"frames/{f}.png" for f in c["frames"]],
         "center_index": c["center_index"],
         "dt_hours": c["dt_hours"],
     }
@@ -284,7 +491,13 @@ def new_session():
         return jsonify(
             {"error": "You have already answered every case in the pool. Thank you!"}
         ), 409
-    algo_version = json.dumps({"git_hash": m.get("git_hash"), "col_params": m.get("col_params")})
+    algo_version = json.dumps(
+        {
+            "version": m.get("algo_version"),
+            "git_hash": m.get("git_hash"),
+            "col_params": m.get("col_params"),
+        }
+    )
     con = get_db()
     sid = con.execute(
         """INSERT INTO sessions (expert_id, n_requested, n_pos_planned, case_order, algo_version, started_at)
@@ -408,8 +621,8 @@ def summary(sid, ex):
                 "case_id": r["case_id"],
                 "outcome": r["outcome"],
                 "month": c["month"] if c else None,
-                "frame": f"/frames/{c['frames'][c['center_index']]}.png" if c else None,
-                "overlay": f"/api/overlay/{r['case_id']}.png",
+                "frame": f"frames/{c['frames'][c['center_index']]}.png" if c else None,
+                "overlay": f"api/overlay/{r['case_id']}.png",
                 "clicks": json.loads(r["clicks"]),
                 "click_matched": [
                     d["matched_col_id"] is not None for d in json.loads(r["click_details"])

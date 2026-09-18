@@ -6,6 +6,7 @@ Environment overrides (handy for tests or a second deployment):
     EXPERT_EVAL_DB         overrides [paths] db_path
 """
 
+import json
 import os
 import pathlib
 import tomllib
@@ -25,3 +26,13 @@ def load_settings(path=None):
         p = pathlib.Path(val)
         s["paths"][key] = p if p.is_absolute() else HERE / p
     return s
+
+
+def server_settings_json(path=None):
+    """Sections the PHP server needs, as JSON (written to settings.json on deploy)."""
+    s = load_settings(path)
+    return json.dumps({k: s[k] for k in ("session", "sampling", "review", "email")}, indent=1)
+
+
+if __name__ == "__main__":  # python settings.py > settings.json
+    print(server_settings_json())

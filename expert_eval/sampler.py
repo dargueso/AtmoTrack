@@ -12,6 +12,10 @@ so cases where experts and the algorithm usually disagree come up more often,
 while cases with few answers get a novelty bonus to keep coverage of the pool.
 Borderline cases sharing tags with an already drawn case are down-weighted to
 rotate through the different borderline situations.
+
+High-impact cases (tag "high_impact") are guaranteed a share of every session
+(settings [session] high_impact_fraction), drawn first with weight 1 / (1 + answers)
+so all events collect answers evenly; they count towards the COL / non-COL balance.
 """
 
 import json
@@ -61,7 +65,9 @@ def draw_session(case_rows, n_cases, exclude, settings, rng=None):
         strata[r["category"]].append(
             {
                 "case_id": r["case_id"],
+                "category": r["category"],
                 "tags": tags,
+                "n": r["n"] or 0,
                 "weight": case_weight(r["n"] or 0, r["n_disagree"] or 0, r["n_unsure"] or 0, sp),
             }
         )
@@ -69,6 +75,17 @@ def draw_session(case_rows, n_cases, exclude, settings, rng=None):
     lo = math.ceil(ss["min_pos_frac"] * n_cases - 1e-9)
     hi = math.floor(ss["max_pos_frac"] * n_cases + 1e-9)
     n_pos = rng.randint(lo, max(lo, hi))
+
+    # high-impact share first (fewest answers most likely), then remove them from the strata
+    pool_hi = [{**c, "weight": 1.0 / (1 + c["n"])} for cs in strata.values() for c in cs
+               if "high_impact" in c["tags"]]  # fmt: skip
+    k_hi = min(round(n_cases * ss.get("high_impact_fraction", 0)), len(pool_hi))
+    hi_cases = _weighted_draw(pool_hi, k_hi, rng)
+    hi_ids = {c["case_id"] for c in hi_cases}
+    for cat in strata:
+        strata[cat] = [c for c in strata[cat] if c["case_id"] not in hi_ids]
+    hi_pos = [c for c in hi_cases if c["category"].startswith("col_")]
+    hi_neg = [c for c in hi_cases if c["category"].startswith("nocol_")]
 
     def draw_class(prefix, k, border_frac):
         k_border = round(k * border_frac)
@@ -80,8 +97,10 @@ def draw_session(case_rows, n_cases, exclude, settings, rng=None):
             border += _weighted_draw(rest, k - len(border) - len(clear), rng, diversify=True)
         return border + clear
 
-    pos = draw_class("col", n_pos, ss["pos_borderline_frac"])
-    neg = draw_class("nocol", n_cases - n_pos, ss["neg_borderline_frac"])
+    pos = hi_pos + draw_class("col", max(0, n_pos - len(hi_pos)), ss["pos_borderline_frac"])
+    neg = hi_neg + draw_class(
+        "nocol", max(0, n_cases - n_pos - len(hi_neg)), ss["neg_borderline_frac"]
+    )
     # if one class ran out, fill from the other so the session still has n_cases
     short = n_cases - len(pos) - len(neg)
     if short > 0:

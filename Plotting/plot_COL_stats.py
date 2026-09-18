@@ -151,6 +151,11 @@ def main():
     os.makedirs(plots_dir, exist_ok=True)
 
     stat_files = sorted(glob.glob(f"{cfg.stats_dir}/events_stats_????.csv"))
+    if not stat_files:
+        sys.exit(
+            f"No events_stats_????.csv files found in {os.path.abspath(cfg.stats_dir)}\n"
+            "Run calc_COL_stats_all_watersheds.py first, or set stats_dir in config.toml."
+        )
 
     dfs = []
     for stat_fin in stat_files:
@@ -255,7 +260,7 @@ def main():
     ax.set_title("Maximum Precipitation per COL")
     ax.set_ylabel("Maximum Precipitation (mm)")
     ax.set_xlabel("Year")
-    ax.set_xlim(1939, 2025)
+    ax.set_xlim(1939, 2026)
     ax.set_ylim(-1, 40)
     ax.legend(loc="upper left", bbox_to_anchor=(1, 1))  # Moves legend outside the plot
     ax.grid()
@@ -278,7 +283,7 @@ def main():
     ax.set_title("Maximum Precipitation per COL")
     ax.set_ylabel("Maximum Precipitation (mm)")
     ax.set_xlabel("Year")
-    ax.set_xlim(1939, 2025)
+    ax.set_xlim(1939, 2026)
     ax.set_ylim(-1, 40)
     ax.legend(loc="upper left", bbox_to_anchor=(1, 1))  # Moves legend outside the plot
     ax.grid()
@@ -305,7 +310,7 @@ def main():
         )
         ax.set_yticks([0, 100, 200, 300])
         ax.set_ylim(0, 350)
-        ax.set_xlim(1939, 2025)
+        ax.set_xlim(1939, 2026)
         # ax.set_ylabel(ws, rotation=0, labelpad=40, va='center')  # Add watershed labels
         ax.set_ylabel("Precipitation (mm)")
 
@@ -342,7 +347,7 @@ def main():
         )
         ax.set_yticks([0, 10, 20, 30])
         ax.set_ylim(0, 30)
-        ax.set_xlim(1939, 2025)
+        ax.set_xlim(1939, 2026)
         ax.set_ylabel("Precipitation (mm)")
 
         if i == 0:
@@ -371,6 +376,9 @@ def main():
 
     df = data_multi.loc[:, ["year", "month", "object_id", "max_precip_ws_hires"]]
     # df = df.drop([('max_precip_ws_hires', 'MED')], axis=1)
+    # ERA5-Land only starts in 1950, so earlier COLs have no hi-res precipitation
+    # in any watershed; idxmax raises on such all-NaN rows (pandas >= 2.1).
+    df = df[df["max_precip_ws_hires"].notna().any(axis=1)].copy()
     df["max_value"] = df["max_precip_ws_hires"].max(axis=1)
     df["ws"] = df["max_precip_ws_hires"].idxmax(axis=1, skipna=True)
     df = df.dropna()
@@ -385,7 +393,7 @@ def main():
     ax.set_title("Maximum Precipitation per COL (Hi-res)")
     ax.set_ylabel("Maximum Precipitation (mm)")
     ax.set_xlabel("Year")
-    ax.set_xlim(1939, 2025)
+    ax.set_xlim(1939, 2026)
     ax.set_ylim(-1, 40)
     ax.legend(loc="upper left", bbox_to_anchor=(1, 1))  # Moves legend outside the plot
     ax.grid()
@@ -413,7 +421,7 @@ def main():
         )
         ax.set_yticks([0, 100, 200, 300])
         ax.set_ylim(0, 350)
-        ax.set_xlim(1939, 2025)
+        ax.set_xlim(1939, 2026)
         # ax.set_ylabel(ws, rotation=0, labelpad=40, va='center')  # Add watershed labels
         ax.set_ylabel("Precipitation (mm)")
 
@@ -452,7 +460,7 @@ def main():
         )
         ax.set_yticks([0, 10, 20, 30])
         ax.set_ylim(0, 30)
-        ax.set_xlim(1939, 2025)
+        ax.set_xlim(1939, 2026)
         ax.set_ylabel("Precipitation (mm)")
 
         if i == 0:

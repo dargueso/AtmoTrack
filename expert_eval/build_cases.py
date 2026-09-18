@@ -19,11 +19,17 @@ Usage
 -----
     python build_cases.py                       # all finished years, 600 new cases
     python build_cases.py --years 1970 --n-cases 40 --jobs 4
+    python build_cases.py --high-impact high_impact_events.toml --target-total 1000
+        # one case per high-impact event, then stratified cases up to 1000 in total
+    python build_cases.py --refresh --high-impact high_impact_events.toml
+        # after tuning and re-running the tracking: recompute the algorithm data of every existing
+        # case (categories, tags, detections, overlays); maps and case ids stay the same
 """
 
 import argparse
 import base64
 import datetime as dt
+import hashlib
 import io
 import json
 import logging
@@ -34,6 +40,7 @@ import random
 import subprocess
 import sys
 import time
+import tomllib
 import zlib
 from bisect import bisect_left
 from collections import defaultdict
@@ -120,6 +127,33 @@ def tracking_files(years=None, settle_minutes=10, force=False):
             continue
         out[year] = f
     return out
+
+
+def algo_version(params, files):
+    """Fingerprint of what the algorithm answer depends on: code, thresholds and tracking files."""
+    try:  # last commit that touched the algorithm code (unrelated commits keep the version)
+        code = subprocess.check_output(
+            [
+                "git",
+                "-C",
+                str(REPO),
+                "log",
+                "-1",
+                "--format=%h",
+                "--",
+                "tracking",
+                "tracking_functions.py",
+            ],
+            text=True,
+        ).strip()
+    except Exception:
+        code = None
+    src = {
+        "algorithm_commit": code,
+        "col_params": params.asdict(),
+        "tracking": sorted((y, f.stat().st_mtime_ns, f.stat().st_size) for y, f in files.items()),
+    }
+    return hashlib.sha1(json.dumps(src, sort_keys=True).encode()).hexdigest()[:10]
 
 
 def open_grid(ds):
@@ -345,7 +379,10 @@ def scan_year(year, path, params, S, cache_dir):
 # Phase 2: stratified selection
 # ---------------------------------------------------------------------------
 class GapChecker:
-    def __init__(self, gap_any_h, gap_event_h):
+    def __init__(self, gap_any_h, gap_event_h, repeat_events=False):
+        self.repeat_events = (
+            repeat_events  # allow several cases per event/category (gap still applies)
+        )
         self.gap_any = np.timedelta64(int(gap_any_h * 3600), "s")
         self.gap_event = np.timedelta64(int(gap_event_h * 3600), "s")
         self.times = []
@@ -365,7 +402,7 @@ class GapChecker:
         if self._too_close(self.times, t, self.gap_any):
             return False
         for ev in c["events"]:
-            if (ev, c["category"]) in self.event_cat:
+            if not self.repeat_events and (ev, c["category"]) in self.event_cat:
                 return False
             if self._too_close(self.event_times[ev], t, self.gap_event):
                 return False
@@ -380,14 +417,27 @@ class GapChecker:
             self.event_cat.add((ev, c["category"]))
 
 
-def select_cases(candidates, n_new, B, existing, rng):
-    checker = GapChecker(B["min_gap_hours_any"], B["min_gap_hours_same_event"])
+CATEGORIES = ("col_clear", "col_borderline", "nocol_clear", "nocol_borderline")
+
+
+def quotas_for(n, B):
+    """Split n cases over the categories with settings [build] quota_* (largest remainder)."""
+    raw = {cat: n * B[f"quota_{cat}"] for cat in CATEGORIES}
+    q = {cat: int(v) for cat, v in raw.items()}
+    for cat in sorted(CATEGORIES, key=lambda c: raw[c] - q[c], reverse=True)[: n - sum(q.values())]:
+        q[cat] += 1
+    return q
+
+
+def select_cases(candidates, quotas, B, existing, rng, repeat_events=False):
+    """Stratified selection; `quotas` maps category -> number of new cases."""
+    checker = GapChecker(B["min_gap_hours_any"], B["min_gap_hours_same_event"], repeat_events)
     for c in existing:
         checker.add(c)
     taken = {c["case_id"] for c in existing}
     chosen = []
-    for cat in ("col_clear", "col_borderline", "nocol_clear", "nocol_borderline"):
-        quota = int(round(n_new * B[f"quota_{cat}"]))
+    for cat in CATEGORIES:
+        quota = quotas.get(cat, 0)
         pool = [c for c in candidates if c["category"] == cat and c["case_id"] not in taken]
         if cat.endswith("borderline"):
             keys = POS_BORDER_TAGS if cat.startswith("col") else NEG_BORDER_TAGS
@@ -417,6 +467,43 @@ def select_cases(candidates, n_new, B, existing, rng):
                     break
         logger.info(f"  {cat:17s}: {got}/{quota} selected (pool {len(pool)})")
     return chosen
+
+
+# ---------------------------------------------------------------------------
+# High-impact events (forced cases)
+# ---------------------------------------------------------------------------
+def choose_event_time(maps, dt_hours, loop_hours):
+    """Case time whose +/-loop covers most slide maps; then prefer a slide map, the midpoint of
+    the covered maps, and finally the later time."""
+    ts = sorted(np.datetime64(m) for m in maps)
+    step = np.timedelta64(dt_hours, "h")
+    loop = np.timedelta64(loop_hours, "h")
+    best = None
+    t = ts[0] - loop
+    while t <= ts[-1] + loop:
+        covered = [m for m in ts if abs(m - t) <= loop]
+        if covered:
+            mid = covered[0] + (covered[-1] - covered[0]) / 2
+            key = (len(covered), t in ts, -abs(t - mid), t)
+            if best is None or key > best[0]:
+                best = (key, t)
+        t += step
+    return best[1]
+
+
+def load_high_impact(path, dt_hours, loop_hours):
+    with open(path, "rb") as f:
+        events = tomllib.load(f)["event"]
+    out = []
+    for ev in events:
+        t = (
+            np.datetime64(ev["case_time"])
+            if ev.get("case_time")
+            else choose_event_time(ev["maps"], dt_hours, loop_hours)
+        )
+        cid = pd.Timestamp(t).strftime("%Y%m%d%H")
+        out.append({"id": ev["id"], "maps": ev["maps"], "case_id": cid, "case_time": str(t)})
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -593,6 +680,7 @@ def build_year_cases(year, path, cases, scan, params, S, cases_dir, no_loop):
                 "category": c["category"],
                 "tags": c["tags"],
                 "events": c["events"],
+                "high_impact_event": c.get("high_impact_event"),
                 "algo_n_cols": len(cols),
                 "box": list(box),
                 "grid": {
@@ -634,15 +722,42 @@ def main():
         "--years", type=int, nargs="*", help="years to use (default: all finished files)"
     )
     ap.add_argument("--n-cases", type=int, default=None, help="number of NEW cases to add")
+    ap.add_argument(
+        "--target-total",
+        type=int,
+        default=None,
+        help="add cases until the pool has this many, keeping the category proportions",
+    )
+    ap.add_argument(
+        "--high-impact", default=None, help="TOML with high-impact events (one case each)"
+    )
+    ap.add_argument(
+        "--min-gap-same-event",
+        type=float,
+        default=None,
+        help="override [build] min_gap_hours_same_event for this run",
+    )
+    ap.add_argument(
+        "--repeat-events",
+        action="store_true",
+        help="allow more than one case per DANA/cyclone event and category (still >= min gap apart)",
+    )
     ap.add_argument("--jobs", type=int, default=8)
     ap.add_argument("--seed", type=int, default=None)
     ap.add_argument("--no-loop", action="store_true", help="render only the central frame")
     ap.add_argument("--force", action="store_true", help="also use files modified recently")
     ap.add_argument("--scan-only", action="store_true", help="scan and print pool statistics")
+    ap.add_argument(
+        "--refresh",
+        action="store_true",
+        help="recompute algorithm data for all existing cases (after tuning); adds no cases",
+    )
     args = ap.parse_args()
 
     S = load_settings()
     B = S["build"]
+    if args.min_gap_same_event is not None:
+        B["min_gap_hours_same_event"] = args.min_gap_same_event
     n_new = args.n_cases if args.n_cases is not None else B["n_cases"]
     cases_dir = S["paths"]["cases_dir"]
     for sub in ("frames", "overlays", "eval/fields", ".scan"):
@@ -686,8 +801,95 @@ def main():
                              "events": e.get("events", [])})  # fmt: skip
 
     rng = random.Random(args.seed)
-    logger.info(f"Selecting {n_new} new cases ({len(existing)} already in the pool)")
-    chosen = select_cases(candidates, n_new, B, existing, rng)
+    by_id = {c["case_id"]: c for c in candidates}
+    version = algo_version(params, files)
+    if (
+        manifest["cases"]
+        and manifest.get("algo_version") not in (None, version)
+        and not args.refresh
+    ):
+        logger.warning(
+            "Tracking output, thresholds or code changed since the last build "
+            f"({manifest.get('algo_version')} -> {version}): existing cases still hold the old "
+            "algorithm answers. Run with --refresh (see README, 'After tuning the algorithm')."
+        )
+
+    if args.refresh:
+        chosen, changes = [], defaultdict(int)
+        for cid in sorted(manifest["cases"]):
+            c = by_id.get(cid)
+            if c is None:
+                logger.warning(
+                    f"  {cid}: no longer a candidate time (year missing or at a year edge); kept as is"
+                )
+                continue
+            c = dict(c)
+            hi = manifest.get("high_impact", {}).get(cid)
+            if hi:
+                c["tags"] = sorted(set(c["tags"]) | {"high_impact"})
+                c["high_impact_event"] = hi["event"]
+            old = next((e for e in existing if e["case_id"] == cid), None)
+            if old and old["category"] != c["category"]:
+                changes[(old["category"], c["category"])] += 1
+            chosen.append(c)
+        logger.info(f"Refreshing {len(chosen)} cases for algorithm version {version}")
+        for (a, b), n in sorted(changes.items()):
+            logger.info(f"  category {a:17s} -> {b:17s}: {n}")
+        if not changes:
+            logger.info("  no category changes")
+
+    # ---- high-impact events: forced cases (existing ones are only tagged)
+    forced = []
+    if args.high_impact and not args.refresh:
+        dt_hours = next(iter(scans.values()))["dt_hours"]
+        events = load_high_impact(args.high_impact, dt_hours, B["loop_hours"])
+        manifest["high_impact"] = {}
+        for ev in events:
+            cid = ev["case_id"]
+            manifest["high_impact"][cid] = {"event": ev["id"], "maps": ev["maps"]}
+            evp = cases_dir / "eval" / f"{cid}.json"
+            if cid in manifest["cases"] and evp.exists():
+                e = json.loads(evp.read_text())
+                e["tags"] = sorted(set(e["tags"]) | {"high_impact"})
+                e["high_impact_event"] = ev["id"]
+                evp.write_text(json.dumps(e))
+                logger.info(
+                    f"  high-impact {ev['id']:10s} {cid} already in the pool ({e['category']}): tagged"
+                )
+                continue
+            c = by_id.get(cid)
+            if c is None:
+                logger.warning(
+                    f"  high-impact {ev['id']}: {cid} not available (outside scanned data or year edge)"
+                )
+                continue
+            c = {
+                **c,
+                "tags": sorted(set(c["tags"]) | {"high_impact"}),
+                "high_impact_event": ev["id"],
+            }
+            forced.append(c)
+            logger.info(
+                f"  high-impact {ev['id']:10s} {cid} maps={','.join(ev['maps'])} -> {c['category']}"
+            )
+        for c in forced:
+            existing.append(c)
+
+    # ---- quotas: fixed number of new cases, or fill up to a target total
+    if args.refresh:
+        pass
+    elif args.target_total is not None:
+        target = quotas_for(args.target_total, B)
+        have = defaultdict(int)
+        for c in existing:
+            have[c["category"]] += 1
+        quotas = {cat: max(0, target[cat] - have[cat]) for cat in CATEGORIES}
+        logger.info(f"Target {args.target_total}: have {dict(have)} -> adding {quotas}")
+    else:
+        quotas = quotas_for(n_new, B)
+        logger.info(f"Selecting {n_new} new cases ({len(existing)} already in the pool)")
+    if not args.refresh:
+        chosen = forced + select_cases(candidates, quotas, B, existing, rng, args.repeat_events)
 
     by_year = defaultdict(list)
     for c in chosen:
@@ -713,6 +915,7 @@ def main():
             "updated_at": dt.datetime.now().isoformat(timespec="seconds"),
             "git_hash": git_hash(),
             "col_params": params.asdict(),
+            "algo_version": version,
             "box": list(params.col_region),
             "loop_hours": B["loop_hours"],
             "geometry": geometry,
@@ -722,6 +925,8 @@ def main():
         {
             "at": manifest["updated_at"],
             "git_hash": manifest["git_hash"],
+            "algo_version": version,
+            "refresh": bool(args.refresh),
             "col_params": params.asdict(),
             "cases": sorted(c["case_id"] for c in chosen),
         }
