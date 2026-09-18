@@ -41,11 +41,7 @@ parser.add_argument(
 )
 args = parser.parse_args()
 
-filein = (
-    args.input
-    if args.input is not None
-    else f"{cfg.data_tracking}/col_z500_{args.year}.nc"
-)
+filein = args.input if args.input is not None else f"{cfg.data_tracking}/col_z500_{args.year}.nc"
 folder = args.output_dir if args.output_dir is not None else str(args.year)
 if not os.path.exists(folder):
     os.makedirs(folder)

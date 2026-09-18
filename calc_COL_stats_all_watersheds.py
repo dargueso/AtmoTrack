@@ -64,9 +64,13 @@ def main():
     lores_files_all = sorted(glob.glob(lores))
     hires_files_all = sorted(glob.glob(hires))
     if not lores_files_all:
-        raise SystemExit(f"No COL tracking files match {os.path.abspath(lores)} — run COL_tracking_ERA5.py first.")
+        raise SystemExit(
+            f"No COL tracking files match {os.path.abspath(lores)} — run COL_tracking_ERA5.py first."
+        )
     if not hires_files_all:
-        raise SystemExit(f"No high-resolution precipitation files match {hires} — check hires_pr_pattern in config.toml.")
+        raise SystemExit(
+            f"No high-resolution precipitation files match {hires} — check hires_pr_pattern in config.toml."
+        )
 
     # Watershed mask
     ws_mask_lores = xr.open_dataset(cfg.watershed_mask)
@@ -87,7 +91,9 @@ def main():
         all_results = []
 
         # Load the data for the year
-        lores_matches = [f for f in lores_files_all if os.path.basename(f) == f"col_z500_{year:04d}.nc"]
+        lores_matches = [
+            f for f in lores_files_all if os.path.basename(f) == f"col_z500_{year:04d}.nc"
+        ]
         if not lores_matches:
             logging.warning(f"No COL tracking file for {year}; skipping")
             continue
