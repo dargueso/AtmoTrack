@@ -311,6 +311,17 @@ ruff format .       # auto-format
 ruff check --fix .  # auto-fix safe issues
 ```
 
+The GitHub Actions workflow runs `ruff check .` and `ruff format --check .`, so
+an unformatted commit turns the pull request red. A pre-commit hook that runs
+both on the staged Python files is included; enable it once per clone with:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+It is skipped when `ruff` is not on the PATH (e.g. the `atmotrack` environment
+is not active), and `git commit --no-verify` bypasses it for one commit.
+
 ---
 
 ## Smoke test

@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+#
+# pre-commit — run the same ruff checks as CI before a commit is made.
+#
+# CI (.github/workflows/test.yml) runs "ruff check ." and "ruff format --check .";
+# a commit that fails either makes the pull request go red, so catch it here.
+#
+# Enable it once per clone with:
+#   git config core.hooksPath .githooks
+#
+# Skip it for a single commit with "git commit --no-verify".
+
+set -u
+
+# Nothing to check if ruff is not installed (e.g. the atmotrack environment is
+# not active). Warn rather than block the commit.
+if ! command -v ruff >/dev/null 2>&1; then
+    echo "pre-commit: ruff not found — skipping lint checks."
+    echo "            Activate the atmotrack environment to have commits checked."
+    exit 0
+fi
+
+# Only look at Python files that are actually staged.
+mapfile -t staged < <(git diff --cached --name-only --diff-filter=ACMR -- '*.py')
+if [ ${#staged[@]} -eq 0 ]; then
+    exit 0
+fi
+
+status=0
+
+if ! ruff check "${staged[@]}"; then
+    echo
+    echo "pre-commit: 'ruff check' failed. Fix the issues above, or run:"
+    echo "            ruff check --fix ${staged[*]}"
+    status=1
+fi
+
+if ! ruff format --check "${staged[@]}"; then
+    echo
+    echo "pre-commit: 'ruff format --check' failed. Reformat and re-stage with:"
+    echo "            ruff format ${staged[*]} && git add ${staged[*]}"
+    status=1
+fi
+
+if [ $status -ne 0 ]; then
+    echo
+    echo "            (commit anyway with 'git commit --no-verify')"
+fi
+
+exit $status
