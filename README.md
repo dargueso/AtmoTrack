@@ -137,6 +137,25 @@ python download_ERA5.py --year-start 2020 --year-end 2024 --keep-monthly
 
 Available datasets: `z500`, `z200`, `z300`, `z850`, `slp`, `pr`
 
+### Precipitable water
+
+`download_ERA5_PW.py` downloads precipitable water — ERA5 total column water
+vapour (`tcwv`, in mm) — as **monthly means**, one CDS request per year, and
+writes `era5_monthly_TCWV_{year}.nc` next to the other ERA5 input files. These
+files feed `Plotting/plot_PW_box_timeseries.py` and are not used by the
+trackers.
+
+```bash
+# Whole ERA5 period, including this year's complete months
+python download_ERA5_PW.py --year-start 1940 --current-year
+
+# A year range, a custom domain [N W S E] and a different output directory
+python download_ERA5_PW.py --years 2023 2024 --area 45 -10 35 5 --outdir /scratch/era5
+```
+
+Years already downloaded are skipped, so an interrupted run can simply be
+repeated; the current year is refreshed on every run as new months appear.
+
 ---
 
 ## Expected input data layout (ERA5 defaults)
@@ -170,6 +189,8 @@ that match the default patterns.
 | `AR_IVT_tracking_ERA5.py` | Track atmospheric rivers from integrated vapour transport |
 | `calc_COL_stats_all_watersheds.py` | Aggregate per-COL precipitation stats by watershed |
 | `plot_COL_stats.py` | Plot annual statistics and trends |
+| `download_ERA5_PW.py` | Download monthly-mean precipitable water (ERA5 `tcwv`) from the CDS |
+| `Plotting/plot_PW_box_timeseries.py` | Plot precipitable water over a box: map + monthly or seasonal means, running mean and trend |
 
 Run any script from the project root, e.g.:
 

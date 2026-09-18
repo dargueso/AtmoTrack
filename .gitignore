@@ -11,6 +11,7 @@ out.log
 # --- Plots ---
 *.png
 *.pdf
+plots/*.csv
 
 # --- Python cache ---
 __pycache__/
