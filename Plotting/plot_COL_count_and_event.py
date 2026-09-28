@@ -38,6 +38,7 @@ import seaborn as sns  # noqa: E402
 import xarray as xr  # noqa: E402
 from matplotlib.colors import BoundaryNorm  # noqa: E402
 from matplotlib.gridspec import GridSpec  # noqa: E402
+from matplotlib.patches import Patch, Rectangle  # noqa: E402
 from plot_COL_stats import add_trend_with_ci  # noqa: E402
 
 import atmotrack_config as cfg  # noqa: E402
@@ -47,7 +48,13 @@ DEFAULT_DATE = "2024-10-29 12:00"
 
 Z500_LEVELS = np.arange(500, 600, 5)  # dam
 T850_LEVELS = np.arange(250, 300, 5)  # K
-BARB_SKIP = 10  # plot one wind barb every N grid points
+BARB_SKIP = 14  # plot one wind barb every N grid points
+HATCH_LW = 1.2  # stroke width of the hatching over the detected COL
+BARB_LENGTH = 4.5  # barb length in points, on the map and in the key
+BARB_KEY_SPEEDS = (5, 10, 25, 50)  # m/s: half barb, full barb, two and a half, pennant
+# The expert evaluation site draws the study region at lw 2.2 on a 6.9 in wide
+# map; this is the same weight scaled to the narrower map used here.
+STUDY_REGION_LW = 1.6
 
 
 def parse_date(text):
@@ -113,11 +120,42 @@ def plot_annual_count(ax, counts, event_year):
             fontsize=9,
         )
 
-    ax.set_title("Total Number of Cut-off Lows per Year")
-    ax.set_ylabel("Number of Cut-off Lows")
-    ax.set_xlabel("Year")
+    ax.set_title("a", loc="left", fontweight="bold", fontsize=13)
+    ax.set_title("Total Number of Cut-off Lows per Year", fontsize=12)
+    ax.set_ylabel("Number of Cut-off Lows", fontsize=10)
+    ax.set_xlabel("Year", fontsize=10)
+    ax.tick_params(labelsize=9)
     ax.legend(loc="upper left", fontsize=9)
     ax.grid()
+
+
+def add_barb_key(ax, y0):
+    """A small box of sample barbs, so the barb glyphs can be read as speeds."""
+    key_ax = ax.inset_axes([0.02, y0, 0.40, 0.13], zorder=106)
+    key_ax.set_facecolor("white")
+    key_ax.set_xticks([])
+    key_ax.set_yticks([])
+    for spine in key_ax.spines.values():
+        spine.set_edgecolor("0.3")
+
+    speeds = np.array(BARB_KEY_SPEEDS)
+    x = np.arange(len(speeds)) + 0.5
+    key_ax.set_xlim(0, len(speeds))
+    key_ax.set_ylim(0, 1)
+    key_ax.text(0.12, 0.82, "850 hPa wind (m s$^{-1}$)", ha="left", va="center", fontsize=7.5)
+    key_ax.barbs(
+        x,
+        np.full(len(speeds), 0.46),
+        speeds,
+        np.zeros(len(speeds)),
+        length=BARB_LENGTH,
+        linewidth=0.5,
+        color="0.2",
+        pivot="middle",  # centre each glyph over its label
+    )
+    for xi, speed in zip(x, speeds):
+        key_ax.text(xi, 0.15, str(speed), ha="center", va="center", fontsize=7)
+    return key_ax
 
 
 def plot_event_map(ax, step, lon, lat, date):
@@ -144,39 +182,110 @@ def plot_event_map(ax, step, lon, lat, date):
         step.t850,
         levels=T850_LEVELS,
         colors="b",
-        linewidths=1.5,
+        linewidths=0.7,
         transform=ccrs.PlateCarree(),
         zorder=103,
     )
-    ax.clabel(line_contour, colors=["b"], inline=True, fmt=" {:.0f} ".format, zorder=103)
+    ax.clabel(
+        line_contour,
+        colors=["b"],
+        inline=True,
+        fmt=" {:.0f} ".format,
+        fontsize=7,
+        zorder=103,
+    )
 
     ax.barbs(
         lon2d[::BARB_SKIP, ::BARB_SKIP],
         lat2d[::BARB_SKIP, ::BARB_SKIP],
         step.u850.values[::BARB_SKIP, ::BARB_SKIP],
         step.v850.values[::BARB_SKIP, ::BARB_SKIP],
-        length=5,
+        length=BARB_LENGTH,
+        linewidth=0.5,
+        color="0.2",
         transform=ccrs.PlateCarree(),
         zorder=104,
     )
 
+    # cfg.col_region is [lon_min, lon_max, lat_min, lat_max]: a COL track must
+    # pass through this box, so the evaluation site outlines it on every frame.
+    box = cfg.col_region
+    region = Rectangle(
+        (box[0], box[2]),
+        box[1] - box[0],
+        box[3] - box[2],
+        fill=False,
+        edgecolor="k",
+        linestyle="--",
+        linewidth=STUDY_REGION_LW,
+        transform=ccrs.PlateCarree(),
+        zorder=106,
+        label="Study region",
+    )
+    ax.add_patch(region)
+
     # The region the algorithm labelled as a COL at this time step.
     obj_mask = (step.col_objects > 0).astype(int)
     detected = int(obj_mask.sum()) > 0
+    handles = [region]
     if detected:
-        hatched = ax.contourf(
-            lon2d,
-            lat2d,
-            obj_mask,
-            levels=[0.5, 1.5],
-            colors="none",
-            hatches=["///"],
-            transform=ccrs.PlateCarree(),
-            zorder=105,
-        )
+        # The key is built in the same rc_context so its hatching matches the map.
+        with plt.rc_context({"hatch.linewidth": HATCH_LW}):
+            hatched = ax.contourf(
+                lon2d,
+                lat2d,
+                obj_mask,
+                levels=[0.5, 1.5],
+                colors="none",
+                hatches=["///"],
+                transform=ccrs.PlateCarree(),
+                zorder=105,
+            )
+            key = Patch(
+                facecolor="none",
+                edgecolor="red",
+                hatch="///",
+                label="Detected COL region",
+            )
         hatched.set_edgecolor("red")
+        handles.insert(0, key)
+    else:
+        ax.text(
+            0.034,  # offsets the bbox pad, so the box lines up with the keys
+            0.245,
+            "No COL detected",
+            transform=ax.transAxes,
+            fontsize=9,
+            va="bottom",
+            ha="left",
+            zorder=106,
+            bbox={
+                "facecolor": "white",
+                "alpha": 1.0,
+                "edgecolor": "0.3",
+                "boxstyle": "round,pad=0.5",
+            },
+        )
 
-    ax.coastlines(linewidth=0.5, zorder=102, resolution="50m")
+    legend = ax.legend(
+        handles=handles,
+        loc="lower left",
+        bbox_to_anchor=(0.02, 0.17),
+        bbox_transform=ax.transAxes,
+        borderaxespad=0,
+        fontsize=9,
+        framealpha=1.0,
+        facecolor="white",
+        edgecolor="0.3",
+        borderpad=0.6,
+        handlelength=2.0,
+        handleheight=1.4,
+    )
+    legend.set_zorder(106)
+
+    add_barb_key(ax, y0=0.03)
+
+    ax.coastlines(linewidth=0.9, zorder=102, resolution="50m")
     gl = ax.gridlines(
         crs=ccrs.PlateCarree(),
         xlocs=range(-180, 181, 10),
@@ -188,11 +297,13 @@ def plot_event_map(ax, step, lon, lat, date):
         linestyle="--",
     )
     gl.top_labels = gl.right_labels = False
+    gl.xlabel_style = gl.ylabel_style = {"size": 8}
 
-    title = f"Z500 and T850 {date.strftime('%Y-%m-%d %H:%M')} UTC"
-    if not detected:
-        title += " — no COL detected"
-    ax.set_title(title)
+    ax.set_title("b", loc="left", fontweight="bold", fontsize=13)
+    ax.set_title(
+        f"Z500 and T850 {date.strftime('%Y-%m-%d %H:%M')} UTC",
+        fontsize=12,
+    )
     return contourf
 
 
@@ -239,15 +350,17 @@ def main():
     lat = ds.latitude.squeeze().values
     lon = ds.longitude.squeeze().values
 
-    fig = plt.figure(figsize=(17, 6.5), constrained_layout=True)
-    gs = GridSpec(1, 2, figure=fig, width_ratios=[1.3, 1])
+    fig = plt.figure(figsize=(13.5, 6.5), layout="constrained")
+    fig.get_layout_engine().set(w_pad=0.02, wspace=0.01)
+    gs = GridSpec(1, 2, figure=fig, width_ratios=[1.5, 1])
 
     plot_annual_count(fig.add_subplot(gs[0]), counts, actual.year)
 
     ax_map = fig.add_subplot(gs[1], projection=ccrs.PlateCarree())
     contourf = plot_event_map(ax_map, step, lon, lat, actual)
-    cbar = fig.colorbar(contourf, ax=ax_map, shrink=0.85)
-    cbar.set_label("Z500 (dam)")
+    cbar = fig.colorbar(contourf, ax=ax_map, shrink=0.9, pad=0.02, aspect=30)
+    cbar.set_label("Z500 (dam)", fontsize=10)
+    cbar.ax.tick_params(labelsize=8)
 
     os.makedirs(args.outdir, exist_ok=True)
     out_png = os.path.join(args.outdir, f"COL_count_and_event_{actual.strftime('%Y%m%d%H')}.png")
