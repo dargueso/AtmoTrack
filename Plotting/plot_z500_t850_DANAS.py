@@ -138,9 +138,8 @@ for idate in range(len(data.time)):
         transform=ccrs.PlateCarree(),
         zorder=105,
     )
-    # Iterate over the resulting collections and set the edgecolor to red.
-    for collection in c.collections:
-        collection.set_edgecolor("red")
+    # Draw the hatching in red (ContourSet.collections was removed in matplotlib 3.10).
+    c.set_edgecolor("red")
 
     ax.coastlines(linewidth=0.5, zorder=102, resolution="50m")
     gl = ax.gridlines(
