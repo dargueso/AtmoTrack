@@ -7,7 +7,7 @@
     {
       "name": "Argüeso, Daniel",
       "affiliation": "Universitat de les Illes Balears",
-      "orcid": "0000-0002-2049-1890"
+      "orcid": "0000-0002-4792-162X"
     }
   ],
   "description": "<p>AtmoTrack detects and tracks atmospheric systems from ERA5 reanalysis or any other CF-compliant NetCDF dataset: Cut-Off Lows (COL), upper-level (500 hPa) and surface (SLP) cyclones and anticyclones, tropical cyclones, jet streams, atmospheric rivers (850 hPa moisture flux or integrated vapour transport), Mesoscale Convective Systems and fronts. All thresholds, the domain and the input layout are set in a single <code>config.toml</code> file; each tracker is available as a command-line tool and as a Python function.</p>",
