@@ -1,7 +1,8 @@
 """``atmotrack-ar-ivt`` — Atmospheric River tracking from Integrated Vapour Transport.
 
 For each year in the configured input dataset:
-  1. Loads eastward (ivte) and northward (ivtn) IVT components [kg m⁻¹ s⁻¹].
+  1. Loads eastward (ivte) and northward (ivtn) IVT components [kg m⁻¹ s⁻¹]
+     at the configured time step ``DT``.
   2. Computes IVT magnitude: sqrt(ivte² + ivtn²).
   3. Runs AR_IVT_tracking to label AR objects.
   4. Writes ``ar_ivt_{year}.nc`` to ``data_tracking``.
@@ -17,13 +18,12 @@ import numpy as np
 
 from atmotrack import config as cfg
 from atmotrack.cli._common import (
+    load_stream,
     parse_args,
     run_years,
-    warn_if_dt_differs,
     worker_logger,
     years_in_pattern,
 )
-from atmotrack.io import infer_dt, load_grid, load_times, open_pattern, slice_year
 from atmotrack.tracking import AR_IVT_tracking
 
 
@@ -39,22 +39,17 @@ def ar_ivt_tracking_worker(year: int, verbose: bool = False) -> None:
     logger.info(f"Analyzing year {year}")
     start_time = time.time()
 
-    ds = slice_year(open_pattern("pattern_ivt"), year)
-
-    ivte = ds[cfg.var_ivte].values  # eastward IVT [kg m⁻¹ s⁻¹]
-    ivtn = ds[cfg.var_ivtn].values  # northward IVT [kg m⁻¹ s⁻¹]
+    ivt = load_stream("pattern_ivt", year, logger)
+    ivte = ivt.field("var_ivte")  # eastward IVT [kg m⁻¹ s⁻¹]
+    ivtn = ivt.field("var_ivtn")  # northward IVT [kg m⁻¹ s⁻¹]
     IVT = np.sqrt(ivte**2 + ivtn**2)
-
-    lon2d, lat2d = load_grid(ds)
-    times = load_times(ds)
-    warn_if_dt_differs(logger, infer_dt(times))
 
     logger.debug(f"Loading data: {time.time() - start_time:.2f} s")
     start_time = time.time()
 
     fileout = pathlib.Path(cfg.data_tracking) / f"ar_ivt_{year:04d}.nc"
 
-    AR_IVT_tracking(IVT, times, lon2d, lat2d, nc_file=str(fileout))
+    AR_IVT_tracking(IVT, ivt.times, ivt.lon, ivt.lat, nc_file=str(fileout))
 
     logger.info(f"DONE year {year} in {time.time() - start_time:.2f} s")
 

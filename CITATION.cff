@@ -2,7 +2,7 @@ cff-version: 1.2.0
 message: "If you use AtmoTrack in published research, please cite it as below."
 type: software
 title: "AtmoTrack: Atmospheric system tracking from CF-compliant NetCDF data"
-version: 1.0.0
+version: 1.1.0
 date-released: "2026-10-09"
 license: MIT
 authors:
@@ -12,7 +12,7 @@ authors:
     affiliation: "Universitat de les Illes Balears"
     orcid: "https://orcid.org/0000-0002-4792-162X"
 repository-code: "https://github.com/dargueso/AtmoTrack"
-doi: 10.5281/zenodo.23263418
+doi: 10.5281/zenodo.23263417
 identifiers:
   - type: doi
     value: 10.5281/zenodo.23263417
@@ -20,6 +20,7 @@ identifiers:
   - type: doi
     value: 10.5281/zenodo.23263418
     description: "Version DOI (v1.0.0)"
+  # v1.1.0 version DOI is added once Zenodo mints it
 abstract: >
   AtmoTrack detects and tracks atmospheric systems — Cut-Off Lows (COL),
   upper-level and surface cyclones/anticyclones, tropical cyclones, jet

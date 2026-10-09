@@ -6,14 +6,14 @@ import time
 
 import numpy as np
 import scipy.ndimage as filters
-import xarray as xr
 from scipy import ndimage
 
 from atmotrack import config as cfg
+from atmotrack.grid import Grid
+from atmotrack.output import write_tracking_file
 
 from .shared import (
     ConnectLon,
-    calc_grid_distance_area,
     calc_object_characteristics,
     calculate_area_objects,
     remove_small_short_objects,
@@ -50,17 +50,16 @@ def MCS_tracking(pr_data, bt_data, times, Lon, Lat, nc_file):
 
     # Calculating grid distances and areas
 
-    _, _, grid_cell_area, grid_spacing = calc_grid_distance_area(Lat, Lon)
-    grid_cell_area[grid_cell_area < 0] = 0
+    grid = Grid(Lon, Lat)
+    grid_cell_area = grid.cell_area
+    grid_spacing = grid.spacing
 
     obj_structure_3D = np.ones((3, 3, 3))
 
     start_day = times[0]
 
-    # connect over date line?
-    crosses_dateline = False
-    if (Lon[0, 0] < -176) & (Lon[0, -1] > 176):
-        crosses_dateline = True
+    # connect over the longitude seam of a global grid?
+    crosses_dateline = grid.is_global_periodic
 
     end_time = time.time()
     logger.debug(
@@ -277,35 +276,16 @@ def MCS_tracking(pr_data, bt_data, times, Lon, Lat, nc_file):
     if nc_file is not None:
         logger.debug("Save objects into a netCDF")
 
-        fino = xr.Dataset(
-            {
-                "MCS_objects": (["time", "latitude", "longitude"], objects_id_MCS),
-                "PR": (["time", "latitude", "longitude"], pr_data),
-                "PR_objects": (["time", "latitude", "longitude"], objects_id_pr),
-                "BT": (["time", "latitude", "longitude"], bt_data),
-                "BT_objects": (["time", "latitude", "longitude"], objects_id_bt),
-            },
-            coords={
-                "time": times.values,
-                "latitude": Lat[:, 0].squeeze(),
-                "longitude": Lon[0, :].squeeze(),
-            },
-        )
-
-        fino.to_netcdf(
+        write_tracking_file(
             nc_file,
-            mode="w",
-            encoding={
-                "time": {
-                    "units": "hours since 1900-01-01 00:00:00",
-                    "calendar": "standard",
-                    "dtype": "int32",
-                },
-                "PR": {"zlib": True, "complevel": 5},
-                "PR_objects": {"zlib": True, "complevel": 5},
-                "BT": {"zlib": True, "complevel": 5},
-                "BT_objects": {"zlib": True, "complevel": 5},
-                "MCS_objects": {"zlib": True, "complevel": 5},
+            times,
+            grid,
+            {
+                "MCS_objects": (objects_id_MCS, {"long_name": "MCS object labels"}),
+                "PR": (pr_data, {"units": "mm", "long_name": "precipitation per time step"}),
+                "PR_objects": (objects_id_pr, {"long_name": "precipitation object labels"}),
+                "BT": (bt_data, {"units": "K", "long_name": "brightness temperature"}),
+                "BT_objects": (objects_id_bt, {"long_name": "cloud shield object labels"}),
             },
         )
 

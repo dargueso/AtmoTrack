@@ -126,4 +126,24 @@ def load(path: str | os.PathLike | None = None) -> pathlib.Path:
     return p
 
 
+def get(key: str, default=None, *, renamed_from: str | None = None):
+    """Return configuration key *key*.
+
+    When the key is missing but the old name *renamed_from* is present, raise a
+    ``KeyError`` that tells the user how to update the file.  When neither is
+    present, return *default* (or raise when *default* is None).
+    """
+    g = globals()
+    if key in g and key in _loaded_keys:
+        return g[key]
+    if renamed_from and renamed_from in _loaded_keys:
+        raise KeyError(
+            f"config key '{renamed_from}' was renamed to '{key}' (now in hours). "
+            f"Update {config_path}."
+        )
+    if default is None:
+        raise KeyError(f"config key '{key}' missing from {config_path}")
+    return default
+
+
 load()

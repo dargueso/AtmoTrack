@@ -9,63 +9,30 @@ import scipy.ndimage as filters
 from scipy import ndimage
 from scipy.ndimage import distance_transform_edt
 
-from atmotrack.constants import const
+from atmotrack.grid import calc_grid_distance_area, haversine  # noqa: F401  (re-exported)
 
 logger = logging.getLogger("atmotrack")
 
 
-def haversine(lat1, lon1, lat2, lon2):
-    """Function to calculate grid distances lat-lon
-    This uses the Haversine formula
-    lat,lon : input coordinates (degrees) - array or float
-    dist_m : distance (m)
-    https://en.wikipedia.org/wiki/Haversine_formula
+def odd_window(n):
+    """Smallest odd window size >= n (and >= 1).
+
+    Even-sized windows are centred with a half-cell offset by scipy, which makes
+    the result depend on the orientation of the grid; odd windows are symmetric.
     """
-    # convert decimal degrees to radians
-    lon1 = np.radians(lon1)
-    lon2 = np.radians(lon2)
-    lat1 = np.radians(lat1)
-    lat2 = np.radians(lat2)
-
-    # haversine formula
-    dlon = lon2 - lon1
-    dlat = lat2 - lat1
-    a = np.sin(dlat / 2) ** 2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon / 2) ** 2
-    c = 2 * np.arcsin(np.sqrt(a))
-    # Radius of earth in kilometers is 6371
-    dist_m = c * const.earth_radius
-    return dist_m
-
-
-def calc_grid_distance_area(lat, lon):
-    """Function to calculate grid parameters
-    It uses haversine function to approximate distances
-    It approximates the first row and column to the sencond
-    because coordinates of grid cell center are assumed
-    lat, lon: input coordinates(degrees) 2D [y,x] dimensions
-    dx: distance (m)
-    dy: distance (m)
-    area: area of grid cell (m2)
-    grid_distance: average grid distance over the domain (m)
-    """
-    dy = np.zeros(lat.shape)
-    dx = np.zeros(lon.shape)
-
-    dx[:, 1:] = haversine(lat[:, 1:], lon[:, 1:], lat[:, :-1], lon[:, :-1])
-    dy[1:, :] = haversine(lat[1:, :], lon[1:, :], lat[:-1, :], lon[:-1, :])
-
-    dx[:, 0] = dx[:, 1]
-    dy[0, :] = dy[1, :]
-
-    area = dx * dy
-    grid_distance = np.mean(np.append(dy[:, :, None], dx[:, :, None], axis=2))
-
-    return dx, dy, area, grid_distance
+    n = max(int(n), 1)
+    return n if n % 2 else n + 1
 
 
 def smooth_uniform(data, time_size, spatial_size):
-    """Uniform filter helper: size=(time_size, spatial_size, spatial_size)."""
-    return filters.uniform_filter(data, size=(time_size, spatial_size, spatial_size))
+    """Uniform (running-mean) filter with odd window sizes.
+
+    ``size=(time_size, spatial_size, spatial_size)``; both sizes are rounded up
+    to the next odd number so that the filter is symmetric.
+    """
+    return filters.uniform_filter(
+        data, size=(odd_window(time_size), odd_window(spatial_size), odd_window(spatial_size))
+    )
 
 
 def calculate_area_objects(objects_id_pr, object_indices, grid_cell_area):
@@ -287,13 +254,14 @@ def ConnectLon_on_timestep(object_indices):
 ### Break up long living cyclones by extracting the biggest cyclone at each time
 def BreakupObjects(
     DATA,  # 3D matrix [time,lat,lon] containing the objects
-    min_tsteps,  # minimum lifetime in data timesteps
-    dT,
-):  # time step in hours
+    min_tsteps,  # minimum lifetime in data timesteps (already divided by DT)
+    dT=None,  # kept for backward compatibility; unused
+):
+    """Split long-lived objects made of several 2-D features and drop objects
+    shorter than ``min_tsteps`` time steps."""
 
     object_indices = ndimage.find_objects(DATA)
     MaxOb = np.max(DATA)
-    int(24 / dT)  # min lifetime of object to be split
     AVmax = 1.5
 
     obj_structure_2D = np.zeros((3, 3, 3))
@@ -405,7 +373,7 @@ def BreakupObjects(
     CY_objectsTMP[:] = 0
     ii = 1
     for obj, _ in enumerate(rgiVolObj):
-        if TT[obj] >= min_tsteps / dT:
+        if TT[obj] >= min_tsteps:
             CY_objectsTMP[DATA == Unique[obj]] = ii
             ii = ii + 1
 
@@ -421,14 +389,14 @@ def BreakupObjects(
     return DATA_fin
 
 
-def clean_up_objects(DATA, dT, min_tsteps=0, obj_splitmerge=None):
-    """Function to remove objects that are too short lived
-    and to numerrate the object from 1...N
+def clean_up_objects(DATA, dT=None, min_tsteps=0, obj_splitmerge=None):
+    """Remove objects shorter than ``min_tsteps`` time steps and renumber 1..N.
+
+    ``min_tsteps`` is already expressed in time steps; ``dT`` is unused and
+    kept for backward compatibility.
     """
 
     object_indices = ndimage.find_objects(DATA)
-    np.max(DATA)
-    int(24 / dT)  # min lifetime of object to be split
 
     id_translate = np.zeros((len(object_indices), 2))
     objectsTMP = np.copy(DATA)
@@ -436,7 +404,7 @@ def clean_up_objects(DATA, dT, min_tsteps=0, obj_splitmerge=None):
     ii = 1
     for obj in range(len(object_indices)):
         if object_indices[obj] is not None:
-            if object_indices[obj][0].stop - object_indices[obj][0].start >= min_tsteps / dT:
+            if object_indices[obj][0].stop - object_indices[obj][0].start >= min_tsteps:
                 Obj_tmp = np.copy(objectsTMP[object_indices[obj]])
                 Obj_tmp[DATA[object_indices[obj]] == obj + 1] = ii
                 objectsTMP[object_indices[obj]] = Obj_tmp
