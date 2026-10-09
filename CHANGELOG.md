@@ -6,7 +6,7 @@ All notable changes to AtmoTrack are documented here. The format follows
 
 ## [1.0.0] — 2026-10-09
 
-First public release.
+First public release. DOI: [10.5281/zenodo.23263418](https://doi.org/10.5281/zenodo.23263418)
 
 ### Added
 - Installable `atmotrack` package (`pip install -e .`) with a `src/` layout.

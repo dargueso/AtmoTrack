@@ -2,9 +2,7 @@
 
 [![Smoke test](https://github.com/dargueso/AtmoTrack/actions/workflows/test.yml/badge.svg)](https://github.com/dargueso/AtmoTrack/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-<!-- Once Zenodo has minted the DOI, add:
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.XXXXXXX.svg)](https://doi.org/10.5281/zenodo.XXXXXXX)
--->
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23263417.svg)](https://doi.org/10.5281/zenodo.23263417)
 
 Atmospheric system tracking from any CF-compliant NetCDF dataset.
 
@@ -24,11 +22,12 @@ as a Python function (`from atmotrack.tracking import COL_tracking`).
 If you use AtmoTrack in published research, please cite it:
 
 > Argüeso, D. (2026). *AtmoTrack: Atmospheric system tracking from CF-compliant
-> NetCDF data* (v1.0.0). https://github.com/dargueso/AtmoTrack
+> NetCDF data* (v1.0.0). Zenodo. https://doi.org/10.5281/zenodo.23263418
 
 A machine-readable citation is in `CITATION.cff` (GitHub's **"Cite this
-repository"** button exports BibTeX and APA). Releases are archived on Zenodo;
-the DOI badge above is updated with each release.
+repository"** button exports BibTeX and APA). Releases are archived on Zenodo.
+The badge above points to the concept DOI (10.5281/zenodo.23263417), which always resolves
+to the latest version; cite the version DOI for a specific release.
 
 ---
 
