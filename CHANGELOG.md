@@ -6,6 +6,8 @@ All notable changes to AtmoTrack are documented here. The format follows
 
 ## [1.1.0] — 2026-10-09
 
+DOI: [10.5281/zenodo.23266554](https://doi.org/10.5281/zenodo.23266554)
+
 Generic input, fast per-year loading, and fixes to the lifetime and time-step
 handling. **Tracking results change** with respect to 1.0.0 (see *Changed*); re-run
 the trackers after upgrading.
