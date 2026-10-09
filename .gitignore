@@ -1,7 +1,7 @@
-# --- Data directories (never commit large NetCDF / CSV data) ---
+# --- Data directories (never commit large NetCDF data) ---
 data_era5/
+data_input/
 data_tracking/
-events_stats/
 
 # --- Output files ---
 *.nc
@@ -11,9 +11,8 @@ out.log
 # --- Plots ---
 *.png
 *.pdf
-plots/*.csv
 
-# --- Python cache ---
+# --- Python cache / build ---
 __pycache__/
 *.py[cod]
 *.pyo
@@ -23,6 +22,8 @@ __pycache__/
 dist/
 build/
 .eggs/
+.pytest_cache/
+.ruff_cache/
 
 # --- Jupyter ---
 .ipynb_checkpoints/
@@ -41,3 +42,4 @@ Thumbs.db
 *~
 .idea/
 .vscode/
+.claude/

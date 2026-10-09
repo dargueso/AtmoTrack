@@ -1,13 +1,21 @@
 # AtmoTrack
 
+[![Smoke test](https://github.com/dargueso/AtmoTrack/actions/workflows/test.yml/badge.svg)](https://github.com/dargueso/AtmoTrack/actions/workflows/test.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+<!-- Once Zenodo has minted the DOI, add:
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.XXXXXXX.svg)](https://doi.org/10.5281/zenodo.XXXXXXX)
+-->
+
 Atmospheric system tracking from any CF-compliant NetCDF dataset.
 
-Tracks Cut-Off Lows (COL), upper-level and surface cyclones/anticyclones,
-Mesoscale Convective Systems (MCS), fronts, tropical cyclones (TC),
-jet streams, and atmospheric rivers (AR).
+AtmoTrack detects and tracks **Cut-Off Lows (COL)**, **upper-level and surface
+cyclones/anticyclones**, **tropical cyclones (TC)**, **jet streams**,
+**atmospheric rivers (AR)**, **Mesoscale Convective Systems (MCS)** and
+**fronts**. It works with ERA5 reanalysis out of the box and with WRF, CESM or
+any other source by editing a single `config.toml` — no Python changes needed.
 
-Designed for ERA5 reanalysis out of the box; supports WRF (Lambert Conformal),
-CESM, and any other source by editing `config.toml` — no Python changes needed.
+Each tracker is available both as a command-line tool (`atmotrack-col`, …) and
+as a Python function (`from atmotrack.tracking import COL_tracking`).
 
 ---
 
@@ -15,57 +23,74 @@ CESM, and any other source by editing `config.toml` — no Python changes needed
 
 If you use AtmoTrack in published research, please cite it:
 
-> Argüeso, D. (2024). *AtmoTrack: Atmospheric system tracking from ERA5
-> reanalysis data*. https://github.com/dargueso/AtmoTrack
+> Argüeso, D. (2026). *AtmoTrack: Atmospheric system tracking from CF-compliant
+> NetCDF data* (v1.0.0). https://github.com/dargueso/AtmoTrack
 
-A machine-readable citation is available in `CITATION.cff` (GitHub shows a
-**"Cite this repository"** button in the sidebar that exports BibTeX, APA,
-and other formats automatically).
+A machine-readable citation is in `CITATION.cff` (GitHub's **"Cite this
+repository"** button exports BibTeX and APA). Releases are archived on Zenodo;
+the DOI badge above is updated with each release.
 
 ---
 
-## Requirements
+## Installation
 
-Python ≥ 3.11 (uses built-in `tomllib`; for 3.9/3.10 install `tomli`).
-
-### With conda (recommended)
+Python ≥ 3.11 is required.
 
 ```bash
+git clone https://github.com/dargueso/AtmoTrack.git
+cd AtmoTrack
+
+# conda (recommended) — creates the "atmotrack" environment and installs the package
 conda env create -f environment.yml
 conda activate atmotrack
+
+# or pip, into an existing environment
+pip install -e .                      # core library + commands
+pip install -e ".[tc]"                # + cartopy/shapely for the TC land/sea test
+pip install -e ".[download]"          # + cdsapi for atmotrack-download-era5
+pip install -e ".[dev,tc,download]"   # everything, including pytest and ruff
 ```
 
-### With pip
-
-```bash
-pip install -e ".[dev]"          # installs project + dev tools (pytest, ruff)
-pip install -e ".[dev,download]" # also installs cdsapi for download_ERA5.py
-pip install -e ".[dev,misc]"     # also installs cartopy/geopandas for Misc/ scripts
-```
+The install registers the `atmotrack-*` commands listed below.
 
 ---
 
 ## Configuration
 
-All thresholds, domain settings, file paths, and variable names are set in
-**`config.toml`**. Edit this file before running any script — no source code
-changes needed.
+All thresholds, the domain, the paths and the input variable names live in one
+TOML file. AtmoTrack looks for it in this order:
+
+1. the file named by the `ATMOTRACK_CONFIG` environment variable;
+2. `config.toml` in the current working directory;
+3. the default shipped inside the package.
+
+Start a project by copying the default and editing it:
+
+```bash
+cd /path/to/my_project
+atmotrack-config --init        # writes ./config.toml
+atmotrack-config               # shows which file the commands will use
+atmotrack-config --show        # prints its contents
+```
+
+Library users can switch configuration at run time with
+`atmotrack.config.load("/path/to/config.toml")`.
 
 ### `[paths]`
 
 | Key | Description |
 |---|---|
 | `data_input` | Directory with input NetCDF files for tracking (any source) |
-| `data_era5` | Directory where `download_ERA5.py` writes its output (defaults to `data_input`) |
+| `data_era5` | Directory where `atmotrack-download-era5` writes (defaults to `data_input`) |
 | `data_tracking` | Output directory for tracking NetCDF files |
-| `watershed_mask` | Path to `watershed_mask_medsea.nc` |
-| `hires_pr_pattern` | Glob pattern for ERA5-Land precipitation files |
-| `stats_dir` | Output directory for per-event statistics CSVs |
+| `path_in` | Output prefix used by `MCS_tracking` |
+
+Relative paths are resolved from the directory where a command is launched.
 
 ### `[data_source]`
 
-Controls how input files are found and read. All values below are the ERA5
-defaults — existing ERA5 users need not change anything.
+Controls how input files are found and read. The values below are the ERA5
+defaults.
 
 ```toml
 [data_source]
@@ -105,7 +130,12 @@ pattern_slp  = "wrfout_d01_*.nc"
 var_msl  = "PSFC"
 ```
 
-### Z500 smoothing method
+### Tracker sections
+
+Each tracker has its own section: `[general]` (`DT`, the data time step in
+hours), `[cy_acy_z500]`, `[cy_acy_slp]`, `[col]`, `[fronts]`, `[jetstream]`,
+`[atmospheric_rivers]`, `[tropical_cyclones]` and `[mcs]`. Every key is
+commented in the default file (`atmotrack-config --show`). For example:
 
 ```toml
 [cy_acy_z500]
@@ -117,51 +147,23 @@ z500_smooth_scale_km = 100         # window size (uniform) or sigma (gaussian) i
 
 ## Data download (ERA5 only)
 
-Use `download_ERA5.py` to download ERA5 input files from the
-[Copernicus CDS](https://cds.climate.copernicus.eu/how-to-api).
-Requires a CDS account and a valid `~/.cdsapirc` credentials file.
+`atmotrack-download-era5` fetches the ERA5 input files from the
+[Copernicus CDS](https://cds.climate.copernicus.eu/how-to-api). It needs the
+`download` extra, a CDS account and a valid `~/.cdsapirc`.
 
 ```bash
-# Download all variables for a full year range
-python download_ERA5.py --year-start 1979 --year-end 2024
-
-# Download only the current (possibly incomplete) year
-python download_ERA5.py --current-year
-
-# Download specific years and datasets
-python download_ERA5.py --years 2020 2023 --datasets z500 slp
-
-# Keep intermediate monthly files after concatenation
-python download_ERA5.py --year-start 2020 --year-end 2024 --keep-monthly
+atmotrack-download-era5 --year-start 1979 --year-end 2024   # full year range
+atmotrack-download-era5 --current-year                       # current (incomplete) year
+atmotrack-download-era5 --years 2020 2023 --datasets z500 slp
+atmotrack-download-era5 --year-start 2020 --year-end 2024 --keep-monthly
 ```
 
-Available datasets: `z500`, `z200`, `z300`, `z850`, `slp`, `pr`
+Available datasets: `z500`, `z200`, `z300`, `z850`, `slp`, `pr`.
 
-### Precipitable water
-
-`download_ERA5_PW.py` downloads precipitable water — ERA5 total column water
-vapour (`tcwv`, in mm) — as **monthly means**, one CDS request per year, and
-writes `era5_monthly_TCWV_{year}.nc` next to the other ERA5 input files. These
-files feed `Plotting/plot_PW_box_timeseries.py` and are not used by the
-trackers.
-
-```bash
-# Whole ERA5 period, including this year's complete months
-python download_ERA5_PW.py --year-start 1940 --current-year
-
-# A year range, a custom domain [N W S E] and a different output directory
-python download_ERA5_PW.py --years 2023 2024 --area 45 -10 35 5 --outdir /scratch/era5
-```
-
-Years already downloaded are skipped, so an interrupted run can simply be
-repeated; the current year is refreshed on every run as new months appear.
-
----
-
-## Expected input data layout (ERA5 defaults)
+### Expected input layout (ERA5 defaults)
 
 ```
-data_era5/
+data_input/
   era5_daily_500hPa_*.nc   # geopotential (z) + u-wind at 500 hPa
   era5_daily_200hPa_*.nc   # u, v wind at 200 hPa
   era5_daily_850hPa_*.nc   # t, u, v, q at 850 hPa
@@ -171,171 +173,102 @@ data_era5/
 ```
 
 Files do not need to be organised one-per-year; any glob-matching set of files
-is merged automatically. For ERA5, `download_ERA5.py` produces annual files
-that match the default patterns.
+is merged automatically.
 
 ---
 
-## Entry scripts
+## Commands
 
-| Script | What it does |
-|---|---|
-| `COL_tracking_ERA5.py` | Detect and track Cut-Off Lows from 500 hPa Z anomalies |
-| `CY_ACY500_tracking_ERA5.py` | Track upper-level cyclones/anticyclones from 500 hPa Z |
-| `SLP_tracking_ERA5.py` | Track surface cyclones/anticyclones from SLP |
-| `TC_tracking_ERA5.py` | Filter tropical cyclones from SLP cyclone objects (run SLP first) |
-| `JetStream_tracking_ERA5.py` | Track jet stream objects from 200 hPa wind speed anomalies |
-| `AR_850hPa_tracking_ERA5.py` | Track atmospheric rivers from 850 hPa moisture flux |
-| `AR_IVT_tracking_ERA5.py` | Track atmospheric rivers from integrated vapour transport |
-| `calc_COL_stats_all_watersheds.py` | Aggregate per-COL precipitation stats by watershed |
-| `plot_COL_stats.py` | Plot annual statistics and trends |
-| `download_ERA5_PW.py` | Download monthly-mean precipitable water (ERA5 `tcwv`) from the CDS |
-| `Plotting/plot_PW_box_timeseries.py` | Plot precipitable water over a box: map + monthly or seasonal means, running mean and trend |
+| Command | What it does | Output file |
+|---|---|---|
+| `atmotrack-col` | Detect and track Cut-Off Lows from 500 hPa Z anomalies | `col_z500_{year}.nc` |
+| `atmotrack-cy-z500` | Track upper-level cyclones/anticyclones from 500 hPa Z | `cy_z500_{year}.nc` |
+| `atmotrack-cy-slp` | Track surface cyclones/anticyclones from SLP | `cy_slp_{year}.nc` |
+| `atmotrack-tc` | Filter tropical cyclones from SLP cyclone objects (run `atmotrack-cy-slp` first) | `tc_{year}.nc` |
+| `atmotrack-jet` | Track jet stream objects from 200 hPa wind speed anomalies | `jet_{year}.nc` |
+| `atmotrack-ar-850` | Track atmospheric rivers from 850 hPa moisture flux | `ar850_{year}.nc` |
+| `atmotrack-ar-ivt` | Track atmospheric rivers from integrated vapour transport | `ar_ivt_{year}.nc` |
+| `atmotrack-download-era5` | Download ERA5 input files from the CDS | `era5_daily_*_{year}.nc` |
+| `atmotrack-config` | Show or initialise the configuration file | `config.toml` |
 
-Run any script from the project root, e.g.:
+Output files are written to `data_tracking`, one per year. Each run also writes
+`out.log` in the current directory.
 
-```bash
-python COL_tracking_ERA5.py --year-start 2000 --year-end 2024 --jobs 8 -v
-```
-
-Common flags (all tracking scripts):
+Common flags (all tracking commands):
 
 | Flag | Description |
 |---|---|
-| `--year-start` / `--year-end` | Year range to process |
-| `--jobs` / `-j` | Number of parallel workers (default: 8) |
-| `--verbose` / `-v` | Enable DEBUG-level logging |
+| `--year-start` / `--year-end` | Year range to process (default 1940–2024, clipped to the data) |
+| `--current-year` | Process only the current calendar year |
+| `--jobs` / `-j` | Number of parallel workers, one year each (default: 8) |
+| `--verbose` / `-v` | DEBUG-level logging |
+
+Example:
+
+```bash
+atmotrack-col --year-start 2000 --year-end 2024 --jobs 8 -v
+```
 
 ---
 
-## Output
+## Library
 
-Tracking output NetCDF files are written to `data_tracking/`, one per year:
+```python
+from atmotrack import config as cfg
+from atmotrack.io import open_pattern, slice_year, load_grid, load_times
+from atmotrack.tracking import CY_ACY_z500_tracking, COL_tracking
 
-| File | Content |
-|---|---|
-| `col_z500_{year}.nc` | COL object labels + supporting fields |
-| `cy_z500_{year}.nc` | 500 hPa cyclone/anticyclone labels |
-| `cy_slp_{year}.nc` | Surface cyclone/anticyclone labels |
-| `tc_{year}.nc` | Tropical cyclone labels |
-| `jet_{year}.nc` | Jet stream object labels |
-| `ar850_{year}.nc` | 850 hPa AR object labels |
-| `ar_ivt_{year}.nc` | IVT-based AR object labels |
-
-Statistics CSVs are written to `stats_dir/`; plots to `plots_dir/`.
-
----
-
-## Core library
-
-The `tracking/` package contains all detection, labeling, and tracking
-algorithms, split by concern:
+ds = slice_year(open_pattern("pattern_z500"), 2024)
+lon2d, lat2d = load_grid(ds)
+times = load_times(ds)
+cy, acy = CY_ACY_z500_tracking(ds[cfg.var_z500].values, times, lon2d, lat2d, nc_file=None)
+```
 
 | Module | Contents |
 |---|---|
-| `tracking/shared.py` | Grid helpers, object utilities (`haversine`, `calc_grid_distance_area`, `ConnectLon`, `ConnectLon_on_timestep`, `BreakupObjects`, `clean_up_objects`, …) |
-| `tracking/cy_z500.py` | `CY_ACY_z500_tracking` — 500 hPa cyclone/anticyclone tracking |
-| `tracking/cy_slp.py` | `watershed_2d_overlap`, `CY_ACY_slp_tracking` — surface cyclone/anticyclone tracking |
-| `tracking/col.py` | `Front_tracking`, `COL_tracking` — fronts and cut-off lows |
-| `tracking/mcs.py` | `MCS_tracking` — mesoscale convective systems |
-| `tracking/tc.py` | `TC_tracking` — tropical cyclone filtering |
-| `tracking/jet.py` | `jetstream_tracking` — jet stream objects |
-| `tracking/ar.py` | `AR_850hPa_tracking`, `AR_IVT_tracking` — atmospheric rivers |
+| `atmotrack.config` | Configuration loader; every TOML key is a module attribute (`cfg.DT`, `cfg.col_min_dur`, …); `load(path)` |
+| `atmotrack.io` | Source-agnostic loaders: `open_pattern`, `available_years`, `slice_year`, `load_grid`, `load_times`, `infer_dt` |
+| `atmotrack.tracking.shared` | Grid helpers and object utilities (`haversine`, `calc_grid_distance_area`, `ConnectLon`, `BreakupObjects`, `clean_up_objects`, …) |
+| `atmotrack.tracking.cy_z500` | `CY_ACY_z500_tracking` — 500 hPa cyclone/anticyclone tracking |
+| `atmotrack.tracking.cy_slp` | `watershed_2d_overlap`, `CY_ACY_slp_tracking` — surface cyclone/anticyclone tracking |
+| `atmotrack.tracking.col` | `Front_tracking`, `COL_tracking` — fronts and cut-off lows |
+| `atmotrack.tracking.mcs` | `MCS_tracking` — mesoscale convective systems |
+| `atmotrack.tracking.tc` | `TC_tracking` — tropical cyclone filtering |
+| `atmotrack.tracking.jet` | `jetstream_tracking` — jet stream objects |
+| `atmotrack.tracking.ar` | `AR_850hPa_tracking`, `AR_IVT_tracking` — atmospheric rivers |
+| `atmotrack.constants` | Physical constants (`const.g`, `const.earth_radius`, …) |
+| `atmotrack.utils` | Shared logger (`get_logger`) and TTY-aware ANSI colours |
 
-`atmotrack_io.py` provides the source-agnostic file loader used by all entry scripts.
-
-Import directly from the package or from the backward-compatible shim:
-
-```python
-from tracking import COL_tracking, CY_ACY_z500_tracking  # preferred
-from tracking_functions import COL_tracking  # also works
-```
-
-`utils.py` provides the shared logger and TTY-aware ANSI colour helpers.
-
-`constants.py` holds physical constants (gravity, Earth radius, etc.).
+The tracking functions are also re-exported from the top-level package
+(`from atmotrack import COL_tracking`).
 
 ---
 
-## Watershed mask
-
-The watershed mask (`watershed_mask_medsea.nc`) maps each grid cell to a
-watershed or ocean region ID. It is read by `calc_COL_stats_all_watersheds.py`
-at runtime.
-
-To rebuild the mask for a different domain, use the utilities in `Misc/`:
+## Development
 
 ```bash
-python Misc/select_multipleregion_ERA5_shapefile.py \
-    --input            data_era5/era5_daily_PR_202410.nc \
-    --lsm              /path/to/era5_sst_lsm.nc \
-    --watershed-shp    /path/to/watersheds.shp \
-    --ocean-shp        /path/to/ocean_regions.shp \
-    --output           watershed_mask_medsea.nc
+pip install -e ".[dev,tc]"
+ruff check .            # lint
+ruff format .           # format
+pytest                  # smoke tests on synthetic data (no real files needed)
 ```
 
-### Watershed codes
+The smoke tests (`tests/test_smoke.py`) cover imports and every tracker:
+Z500, SLP, COL, fronts, MCS, TC, jet stream and both AR methods. They run on
+synthetic fields and take a few seconds.
 
-| Code | Watershed |
-|---|---|
-| 22 | CAT (Catalonia) |
-| 23 | EBR (Ebro) |
-| 16 | JUC (Júcar) |
-| 8  | BAL (Balearic) |
-| 7  | SEG (Segura) |
-| 21 | SUR (Sur) |
-| 25 | MED (Mediterranean open sea) |
-
----
-
-## Misc utilities
-
-| Script | What it does |
-|---|---|
-| `Misc/select_multipleregion_ERA5_shapefile.py` | Build the watershed + ocean mask NetCDF |
-| `Misc/select_region_ERA5_shapefile.py` | Create a binary mask for a single shapefile region |
-| `Misc/plot_shapefile.py` | Visualise a single-region shapefile on a map |
-| `Misc/plot_shapefile_multiple_regions.py` | Visualise all regions in a shapefile |
-
-All accept `--help` for full usage information.
-
----
-
-## Linting
-
-[ruff](https://docs.astral.sh/ruff/) is configured in `pyproject.toml`:
-
-```bash
-ruff check .        # check for issues
-ruff format .       # auto-format
-ruff check --fix .  # auto-fix safe issues
-```
-
-The GitHub Actions workflow runs `ruff check .` and `ruff format --check .`, so
-an unformatted commit turns the pull request red. A pre-commit hook that runs
-both on the staged Python files is included; enable it once per clone with:
+The GitHub Actions workflow runs ruff and the tests on Python 3.11–3.13. A
+pre-commit hook that runs ruff on the staged files is included; enable it once
+per clone with:
 
 ```bash
 git config core.hooksPath .githooks
 ```
 
-It is skipped when `ruff` is not on the PATH (e.g. the `atmotrack` environment
-is not active), and `git commit --no-verify` bypasses it for one commit.
+See `CHANGELOG.md` for release notes.
 
 ---
 
-## Smoke test
+## License
 
-A self-contained smoke test verifies the full pipeline on synthetic data
-(no real files required):
-
-```bash
-pytest test_smoke.py -v
-
-# or without pytest:
-python test_smoke.py
-```
-
-Covers 10 tests: imports, Z500 tracking, SLP tracking, COL tracking,
-front tracking, MCS tracking, TC tracking, jet stream tracking,
-850 hPa AR tracking, and IVT AR tracking.
+MIT — see `LICENSE`.

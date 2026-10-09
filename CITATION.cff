@@ -1,9 +1,9 @@
 cff-version: 1.2.0
 message: "If you use AtmoTrack in published research, please cite it as below."
 type: software
-title: "AtmoTrack: Atmospheric system tracking from ERA5 reanalysis data"
+title: "AtmoTrack: Atmospheric system tracking from CF-compliant NetCDF data"
 version: 1.0.0
-date-released: "2024-01-01"
+date-released: "2026-10-09"
 license: MIT
 authors:
   - family-names: Argüeso
@@ -12,15 +12,25 @@ authors:
     affiliation: "Universitat de les Illes Balears"
     orcid: "https://orcid.org/0000-0002-2049-1890"
 repository-code: "https://github.com/dargueso/AtmoTrack"
+# Uncomment and fill in once Zenodo has minted the DOI for the release:
+# doi: 10.5281/zenodo.XXXXXXX
+# identifiers:
+#   - type: doi
+#     value: 10.5281/zenodo.XXXXXXX
+#     description: "Concept DOI (all versions)"
 abstract: >
-  AtmoTrack tracks atmospheric systems — Cut-Off Lows (COL),
-  upper-level and surface cyclones/anticyclones, Mesoscale Convective
-  Systems (MCS), and fronts — from ERA5 reanalysis data over a
-  configurable geographic domain and time period.
+  AtmoTrack detects and tracks atmospheric systems — Cut-Off Lows (COL),
+  upper-level and surface cyclones/anticyclones, tropical cyclones, jet
+  streams, atmospheric rivers, Mesoscale Convective Systems (MCS) and
+  fronts — from ERA5 reanalysis or any other CF-compliant NetCDF dataset,
+  over a configurable geographic domain and time period.
 keywords:
   - atmospheric-science
   - ERA5
+  - reanalysis
   - cut-off-lows
   - cyclone-tracking
-  - reanalysis
+  - tropical-cyclones
+  - atmospheric-rivers
+  - jet-stream
   - python
