@@ -12,7 +12,9 @@
 # ---------------------------------------------------------------------------
 [general]
 # ---------------------------------------------------------------------------
-DT = 3          # data time step [hours]
+DT = 6          # tracking time step [hours]; every input stream is brought to this step
+                # (instantaneous fields subsampled, precipitation accumulated).
+                # Streams at a finer step must divide DT; run atmotrack-check-input to verify.
 
 # ---------------------------------------------------------------------------
 [paths]
@@ -71,6 +73,7 @@ slp_smooth_high_anom = 12         # anticyclone anomaly threshold [hPa]
 MinTimeCY_SLP        = 12         # minimum cyclone lifetime [hours]
 MinTimeACY_SLP       = 12         # minimum anticyclone lifetime [hours]
 slp_breakup_method   = "watershed" # "watershed" or "breakup"
+watershed_time_window_h = 12     # temporal smoothing of the watershed distance field [hours]
 
 # ---------------------------------------------------------------------------
 [col]
@@ -125,7 +128,8 @@ TC_deltaT_core  = 2.0    # warm-core ΔT (center vs object mean) threshold [K]
 TC_T850min      = 273.15 # minimum 850 hPa core temperature [K]
 TC_Pmin         = 980.0  # minimum SLP threshold [hPa]
 TC_lat_max      = 60.0   # maximum abs latitude cutoff [°]
-TC_min_duration = 16     # minimum object timestep count (2 × 8 steps @ 6-hourly)
+TC_min_duration_h = 48   # minimum lifetime of the surface cyclone object [hours]
+TC_persistence_h  = 24   # warm core and SLP < TC_Pmin must hold for at least this long [hours]
 
 # ---------------------------------------------------------------------------
 [data_source]
@@ -174,3 +178,18 @@ var_pr   = "tp"     # total precipitation [m] (resampled to 6-hourly and scaled 
 var_q850 = "q"      # 850 hPa specific humidity [kg/kg]
 var_ivte = "ivte"   # eastward integrated vapour transport [kg m⁻¹ s⁻¹]
 var_ivtn = "ivtn"   # northward integrated vapour transport [kg m⁻¹ s⁻¹]
+
+# ---------------------------------------------------------------------------
+[prepare]
+# atmotrack-prepare: convert any input into AtmoTrack's canonical per-year files
+# (atmotrack_<stream>_<year>.nc under output_dir, ERA5 variable names and units,
+# all streams at [general] DT).  atmotrack-check-input reports what will change.
+# ---------------------------------------------------------------------------
+output_dir      = "./data_prepared"
+lon_convention  = "-180..180"  # "-180..180" or "0..360" (regular grids are re-ordered accordingly)
+lat_order       = "keep"       # "keep", "descending" (ERA5 style) or "ascending"; regular grids only
+pr_kind         = "auto"       # "auto" (from units), "accumulated" (amount per step) or "rate"
+interpolate_time = false       # allow linear interpolation when a stream is coarser than DT
+
+# Source units when the files carry no (or wrong) `units` attribute, e.g.
+# units_z = "m"  (geopotential height) or units_msl = "hPa".  Keys: units_<var>.

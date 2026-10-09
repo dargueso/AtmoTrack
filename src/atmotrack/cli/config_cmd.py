@@ -38,7 +38,23 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--show", action="store_true", help="print the contents of the config in use"
     )
+    parser.add_argument(
+        "--prepared",
+        action="store_true",
+        help="print the [data_source] block that reads files written by atmotrack-prepare",
+    )
+    parser.add_argument(
+        "--curvilinear",
+        action="store_true",
+        help="with --prepared: block for a curvilinear (2-D lat/lon) grid",
+    )
     args = parser.parse_args(argv)
+
+    if args.prepared:
+        from atmotrack.prepare import canonical_data_source
+
+        print(canonical_data_source(regular=not args.curvilinear), end="")
+        return 0
 
     if args.init:
         dest = args.output

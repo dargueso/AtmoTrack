@@ -1,17 +1,14 @@
 """``atmotrack-tc`` — Tropical Cyclone tracking.
 
 Reads the surface cyclone objects produced by ``atmotrack-cy-slp``, then
-loads 850 hPa temperature and SLP from the configured input dataset to apply
-the tropical cyclone criteria.
+loads 850 hPa temperature and SLP from the configured input dataset (both at
+the configured time step ``DT``) to apply the tropical cyclone criteria.
 
 For each year with an existing ``cy_slp_{year}.nc`` file:
   1. Loads the pre-computed SLP cyclone objects.
   2. Loads 850 hPa temperature and SLP from the configured input source.
   3. Runs TC_tracking to filter confirmed tropical cyclones.
   4. Writes ``tc_{year}.nc`` to ``data_tracking``.
-
-All parameters (thresholds, paths, variable names) are read from ``config.toml``.
-Set ``[data_source]`` keys to switch between ERA5, WRF, etc.
 
 Note: run ``atmotrack-cy-slp`` first to generate the required cy_slp files.
 """
@@ -22,8 +19,15 @@ import time
 import xarray as xr
 
 from atmotrack import config as cfg
-from atmotrack.cli._common import LOGGER_NAME, parse_args, run_years, worker_logger
-from atmotrack.io import load_grid, load_times, open_pattern, slice_year
+from atmotrack.cli._common import (
+    LOGGER_NAME,
+    check_same_grid,
+    check_same_times,
+    load_stream,
+    parse_args,
+    run_years,
+    worker_logger,
+)
 from atmotrack.tracking import TC_tracking
 from atmotrack.utils import get_logger
 
@@ -60,17 +64,22 @@ def tc_tracking_worker(year: int, verbose: bool = False) -> None:
 
     # Load pre-computed SLP cyclone objects (internal tracking output)
     cy_slp_path = pathlib.Path(cfg.data_tracking) / f"cy_slp_{year:04d}.nc"
-    ds_cy = xr.open_dataset(cy_slp_path).squeeze()
-    cy_slp_objects = ds_cy.cy_slp_objects.values.astype(int)
+    with xr.open_dataset(cy_slp_path) as ds_cy:
+        cy_slp_objects = ds_cy["cy_slp_objects"].values.astype(int)
 
-    # Load 850 hPa temperature and SLP from the configured input source
-    ds_850 = slice_year(open_pattern("pattern_z850"), year)
-    ds_slp = slice_year(open_pattern("pattern_slp"), year)
-    t850_data = ds_850[cfg.var_t850].values
-    slp_data = ds_slp[cfg.var_msl].values
+    # Load 850 hPa temperature and SLP on the same DT time axis
+    z850 = load_stream("pattern_z850", year, logger)
+    slp = load_stream("pattern_slp", year, logger)
+    check_same_grid(slp, z850, "t850")
+    check_same_times(slp, z850, "t850")
+    t850_data = z850.field("var_t850")
+    slp_data = slp.field("var_msl")
 
-    lon2d, lat2d = load_grid(ds_slp)
-    times = load_times(ds_slp)
+    if cy_slp_objects.shape != slp_data.shape:
+        raise ValueError(
+            f"cy_slp_{year}.nc has shape {cy_slp_objects.shape} but the SLP input at DT="
+            f"{cfg.DT:g} h has {slp_data.shape}; re-run atmotrack-cy-slp with the current config"
+        )
 
     logger.debug(f"Loading data: {time.time() - start_time:.2f} s")
     start_time = time.time()
@@ -81,9 +90,9 @@ def tc_tracking_worker(year: int, verbose: bool = False) -> None:
         cy_slp_objects,
         t850_data,
         slp_data,
-        lon2d,
-        lat2d,
-        times=times,
+        slp.lon,
+        slp.lat,
+        times=slp.times,
         nc_file=str(fileout_tc),
     )
 

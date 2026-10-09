@@ -5,16 +5,16 @@ import logging
 import time
 
 import numpy as np
-import xarray as xr
 from scipy import ndimage
 
 from atmotrack import config as cfg
+from atmotrack.grid import Grid
+from atmotrack.output import write_tracking_file
 from atmotrack.utils import Fore, Style
 
 from .shared import (
     BreakupObjects,
     ConnectLon_on_timestep,
-    calc_grid_distance_area,
     clean_up_objects,
 )
 
@@ -49,10 +49,10 @@ def AR_850hPa_tracking(VapTrans, times, Lon, Lat, nc_file=None):
     MinTimeMS = cfg.MinTimeMS
     MinAreaMS = cfg.MinAreaMS  # [km²]
 
-    _, _, grid_cell_area, _ = calc_grid_distance_area(Lat, Lon)
-    grid_cell_area[grid_cell_area < 0] = 0
+    grid = Grid(Lon, Lat)
+    grid_cell_area = grid.cell_area
 
-    crosses_dateline = (Lon[0, 0] < -176) and (Lon[0, -1] > 176)
+    crosses_dateline = grid.is_global_periodic
 
     obj_structure_3D = np.ones((3, 3, 3))
 
@@ -105,32 +105,16 @@ def AR_850hPa_tracking(VapTrans, times, Lon, Lat, nc_file=None):
     if nc_file is not None:
         logger.debug(f"{Style.BRIGHT} Save AR-850 objects into a NetCDF")
 
-        fino = xr.Dataset(
-            {
-                "ar850_objects": (
-                    ["time", "latitude", "longitude"],
-                    ar850_objects.astype(np.int16),
-                ),
-                "VapTrans": (["time", "latitude", "longitude"], VapTrans.astype(np.float32)),
-            },
-            coords={
-                "time": times.values,
-                "latitude": Lat[:, 0].squeeze(),
-                "longitude": Lon[0, :].squeeze(),
-            },
-        )
-
-        fino.to_netcdf(
+        write_tracking_file(
             nc_file,
-            mode="w",
-            encoding={
-                "time": {
-                    "units": "hours since 1900-01-01 00:00:00",
-                    "calendar": "standard",
-                    "dtype": "int32",
-                },
-                "ar850_objects": {"zlib": True, "complevel": 5},
-                "VapTrans": {"zlib": True, "complevel": 5},
+            times,
+            grid,
+            {
+                "ar850_objects": (ar850_objects, {"long_name": "850 hPa moisture stream labels"}),
+                "VapTrans": (
+                    VapTrans,
+                    {"units": "kg kg**-1 m s**-1", "long_name": "850 hPa moisture flux magnitude"},
+                ),
             },
         )
         logger.debug(f"{Style.BRIGHT} AR-850 NetCDF written to {nc_file}")
@@ -167,7 +151,8 @@ def AR_IVT_tracking(IVT, times, Lon, Lat, nc_file=None):
     IVTthreshold = cfg.IVTthreshold
     MinTimeIVT = cfg.MinTimeIVT
 
-    crosses_dateline = (Lon[0, 0] < -176) and (Lon[0, -1] > 176)
+    grid = Grid(Lon, Lat)
+    crosses_dateline = grid.is_global_periodic
 
     obj_structure_3D = np.ones((3, 3, 3))
 
@@ -194,32 +179,16 @@ def AR_IVT_tracking(IVT, times, Lon, Lat, nc_file=None):
     if nc_file is not None:
         logger.debug(f"{Style.BRIGHT} Save AR-IVT objects into a NetCDF")
 
-        fino = xr.Dataset(
-            {
-                "ar_ivt_objects": (
-                    ["time", "latitude", "longitude"],
-                    ar_ivt_objects.astype(np.int16),
-                ),
-                "IVT": (["time", "latitude", "longitude"], IVT.astype(np.float32)),
-            },
-            coords={
-                "time": times.values,
-                "latitude": Lat[:, 0].squeeze(),
-                "longitude": Lon[0, :].squeeze(),
-            },
-        )
-
-        fino.to_netcdf(
+        write_tracking_file(
             nc_file,
-            mode="w",
-            encoding={
-                "time": {
-                    "units": "hours since 1900-01-01 00:00:00",
-                    "calendar": "standard",
-                    "dtype": "int32",
-                },
-                "ar_ivt_objects": {"zlib": True, "complevel": 5},
-                "IVT": {"zlib": True, "complevel": 5},
+            times,
+            grid,
+            {
+                "ar_ivt_objects": (ar_ivt_objects, {"long_name": "IVT atmospheric river labels"}),
+                "IVT": (
+                    IVT,
+                    {"units": "kg m**-1 s**-1", "long_name": "integrated vapour transport"},
+                ),
             },
         )
         logger.debug(f"{Style.BRIGHT} AR-IVT NetCDF written to {nc_file}")

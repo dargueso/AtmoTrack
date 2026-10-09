@@ -1,7 +1,7 @@
 """``atmotrack-ar-850`` — Atmospheric River tracking from 850 hPa moisture flux.
 
 For each year in the configured input dataset:
-  1. Loads u, v wind and q specific humidity at 850 hPa.
+  1. Loads u, v wind and q specific humidity at 850 hPa (at the configured ``DT``).
   2. Computes moisture flux magnitude: sqrt((u·q)² + (v·q)²).
   3. Runs AR_850hPa_tracking to label AR objects.
   4. Writes ``ar850_{year}.nc`` to ``data_tracking``.
@@ -17,13 +17,12 @@ import numpy as np
 
 from atmotrack import config as cfg
 from atmotrack.cli._common import (
+    load_stream,
     parse_args,
     run_years,
-    warn_if_dt_differs,
     worker_logger,
     years_in_pattern,
 )
-from atmotrack.io import infer_dt, load_grid, load_times, open_pattern, slice_year
 from atmotrack.tracking import AR_850hPa_tracking
 
 
@@ -39,25 +38,20 @@ def ar850_tracking_worker(year: int, verbose: bool = False) -> None:
     logger.info(f"Analyzing year {year}")
     start_time = time.time()
 
-    ds = slice_year(open_pattern("pattern_z850"), year)
-
-    u850 = ds[cfg.var_u850].values
-    v850 = ds[cfg.var_v850].values
-    q850 = ds[cfg.var_q850].values  # specific humidity [kg/kg]; treated as g/g for magnitude
+    z850 = load_stream("pattern_z850", year, logger)
+    u850 = z850.field("var_u850")
+    v850 = z850.field("var_v850")
+    q850 = z850.field("var_q850")  # specific humidity [kg/kg]
 
     # 850 hPa moisture flux magnitude
     VapTrans = np.sqrt((u850 * q850) ** 2 + (v850 * q850) ** 2)
-
-    lon2d, lat2d = load_grid(ds)
-    times = load_times(ds)
-    warn_if_dt_differs(logger, infer_dt(times))
 
     logger.debug(f"Loading data: {time.time() - start_time:.2f} s")
     start_time = time.time()
 
     fileout = pathlib.Path(cfg.data_tracking) / f"ar850_{year:04d}.nc"
 
-    AR_850hPa_tracking(VapTrans, times, lon2d, lat2d, nc_file=str(fileout))
+    AR_850hPa_tracking(VapTrans, z850.times, z850.lon, z850.lat, nc_file=str(fileout))
 
     logger.info(f"DONE year {year} in {time.time() - start_time:.2f} s")
 

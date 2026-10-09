@@ -5,17 +5,17 @@ import logging
 import time
 
 import numpy as np
-import xarray as xr
 from scipy import ndimage
 
 from atmotrack import config as cfg
+from atmotrack.grid import Grid
+from atmotrack.output import write_tracking_file
 from atmotrack.utils import Fore, Style
 
 from .cy_slp import watershed_2d_overlap
 from .shared import (
     BreakupObjects,
     ConnectLon_on_timestep,
-    calc_grid_distance_area,
     clean_up_objects,
     smooth_uniform,
 )
@@ -51,9 +51,10 @@ def jetstream_tracking(uv200, times, Lon, Lat, nc_file=None):
     MinTimeJS = cfg.MinTimeJS
     breakup_method = cfg.js_breakup_method
 
-    _, _, _, grid_spacing = calc_grid_distance_area(Lat, Lon)
+    grid = Grid(Lon, Lat)
+    grid_spacing = grid.spacing
 
-    crosses_dateline = (Lon[0, 0] < -176) and (Lon[0, -1] > 176)
+    crosses_dateline = grid.is_global_periodic
 
     obj_structure_3D = np.ones((3, 3, 3))
 
@@ -105,29 +106,13 @@ def jetstream_tracking(uv200, times, Lon, Lat, nc_file=None):
     if nc_file is not None:
         logger.debug(f"{Style.BRIGHT} Save jet objects into a NetCDF")
 
-        fino = xr.Dataset(
-            {
-                "jet_objects": (["time", "latitude", "longitude"], jet_objects.astype(np.int16)),
-                "uv200": (["time", "latitude", "longitude"], uv200.astype(np.float32)),
-            },
-            coords={
-                "time": times.values,
-                "latitude": Lat[:, 0].squeeze(),
-                "longitude": Lon[0, :].squeeze(),
-            },
-        )
-
-        fino.to_netcdf(
+        write_tracking_file(
             nc_file,
-            mode="w",
-            encoding={
-                "time": {
-                    "units": "hours since 1900-01-01 00:00:00",
-                    "calendar": "standard",
-                    "dtype": "int32",
-                },
-                "jet_objects": {"zlib": True, "complevel": 5},
-                "uv200": {"zlib": True, "complevel": 5},
+            times,
+            grid,
+            {
+                "jet_objects": (jet_objects, {"long_name": "jet stream object labels"}),
+                "uv200": (uv200, {"units": "m s**-1", "long_name": "200 hPa wind speed"}),
             },
         )
         logger.debug(f"{Style.BRIGHT} Jet NetCDF written to {nc_file}")

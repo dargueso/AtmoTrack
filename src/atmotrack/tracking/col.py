@@ -6,14 +6,15 @@ import time
 
 import metpy.calc as calc
 import numpy as np
-import xarray as xr
 from scipy import ndimage
 
 from atmotrack import config as cfg
 from atmotrack.constants import const
+from atmotrack.grid import Grid, to_pm180
+from atmotrack.output import write_tracking_file
 from atmotrack.utils import Fore, Style
 
-from .shared import calc_grid_distance_area, haversine, split_objects
+from .shared import haversine, split_objects
 
 logger = logging.getLogger("atmotrack")
 
@@ -41,17 +42,20 @@ def Front_tracking(u850, v850, t850, times, Lon, Lat, Mask=None):
 
     # Calculate the horizontal derivatives of u and v
 
-    dx, dy, _, _ = calc_grid_distance_area(Lat, Lon)
+    grid = Grid(Lon, Lat)
+    dx, dy = grid.dx, grid.dy
+    # +1 when the row index increases northward, -1 when it decreases (ERA5 order)
+    north = grid.lat_direction
 
-    du = np.gradient(np.array(u850))
-    dv = np.gradient(np.array(v850))
+    du = np.gradient(np.array(u850), axis=(1, 2))
+    dv = np.gradient(np.array(v850), axis=(1, 2))
 
-    # Calculate potential vorticity term for frontal detection
-    PV = np.abs(dv[-1] / dx[None, :] - du[-2] / dy[None, :])
+    # Relative vorticity magnitude: dv/dx - du/dy, with y pointing north
+    PV = np.abs(dv[1] / dx[None, :] - north * du[0] / dy[None, :])
 
-    # Calculate the temperature gradient magnitude
+    # Temperature gradient magnitude in K per 100 km (grid-spacing independent)
     vgrad = np.gradient(np.array(t850), axis=(1, 2))
-    Tgrad = np.sqrt(vgrad[0] ** 2 + vgrad[1] ** 2)
+    Tgrad = np.sqrt((vgrad[0] / dy[None, :]) ** 2 + (vgrad[1] / dx[None, :]) ** 2) * 1.0e5
 
     # Calculate Fstar, the frontal diagnostic variable
     Fstar = PV * Tgrad
@@ -152,9 +156,12 @@ def COL_tracking(
     col_min_lon = cfg.col_min_lon
     col_max_lon = cfg.col_max_lon
 
-    # Calculating grid distances and areas
-    _, _, grid_cell_area, grid_spacing = calc_grid_distance_area(Lat, Lon)
-    grid_cell_area[grid_cell_area < 0] = 0
+    grid = Grid(Lon, Lat)
+    grid_spacing = grid.spacing
+    # +1 when the row index increases northward, -1 when it decreases (ERA5 order)
+    north = grid.lat_direction
+    # Longitudes are compared in the -180..180 convention used by the config bounds
+    Lon_pm = to_pm180(Lon)
 
     # Check if cyclone is a cut-off low
     cy_z500_objects = split_objects(
@@ -203,7 +210,7 @@ def COL_tracking(
         )
         front_slice = front_objects[time_start:time_stop, lat_start:lat_stop, lon_start:lon_stop]
         lat_slice = Lat[lat_start:lat_stop, lon_start:lon_stop]
-        lon_slice = Lon[lat_start:lat_stop, lon_start:lon_stop]
+        lon_slice = Lon_pm[lat_start:lat_stop, lon_start:lon_stop]
 
         # find location of z500 minimum
         z500_slice_obj = np.copy(z500_slice)
@@ -311,10 +318,14 @@ def COL_tracking(
                 continue
 
             # CRITERIA 2) check if 200 hPa wind speed is eastward in the poleward direction of the cyclone
-            if lat_reg[min_la_tt, min_lo_tt] > 0:
-                east_flow = u200_reg[0:min_la_tt, min_lo_tt]
+            # Rows on the northern side of the centre depend on the latitude order of the grid.
+            if north < 0:
+                north_side = u200_reg[0:min_la_tt, min_lo_tt]
+                south_side = u200_reg[min_la_tt + 1 :, min_lo_tt]
             else:
-                east_flow = u200_reg[min_la_tt:-1, min_lo_tt]
+                north_side = u200_reg[min_la_tt + 1 :, min_lo_tt]
+                south_side = u200_reg[0:min_la_tt, min_lo_tt]
+            east_flow = north_side if lat_reg[min_la_tt, min_lo_tt] > 0 else south_side
 
             if east_flow.shape[0] != 0:
                 if np.min(east_flow) > 0:
@@ -427,48 +438,33 @@ def COL_tracking(
     if nc_file is not None:
         logger.debug(f"{Style.BRIGHT} Save objects into a netCDF")
 
-        fino = xr.Dataset(
-            {
-                "cy_z500_objects": (["time", "latitude", "longitude"], cy_z500_objects),
-                "col_objects": (["time", "latitude", "longitude"], col_objects),
-                "front_objects": (["time", "latitude", "longitude"], front_objects),
-                "z500": (["time", "latitude", "longitude"], z500_data),
-                "u200": (["time", "latitude", "longitude"], u200_data),
-                "t850": (["time", "latitude", "longitude"], t850_data),
-                "u850": (["time", "latitude", "longitude"], u850_data),
-                "v850": (["time", "latitude", "longitude"], v850_data),
-                "pr": (["time", "latitude", "longitude"], pr_data),
-                "pr_max": (["time", "latitude", "longitude"], pr_data_max),
-            },
-            coords={
-                "time": times.values,
-                "latitude": Lat[:, 0].squeeze(),
-                "longitude": Lon[0, :].squeeze(),
-            },
-        )
-
-        # Adding units to 'pr' and 'pr_max'
-        fino["pr"].attrs["units"] = "mm"
-        fino["pr_max"].attrs["units"] = "mm/hr"
-
-        # Optionally, you can add a description or other metadata
-        fino["pr"].attrs["description"] = "Accumulated Precipitation"
-        fino["pr_max"].attrs["description"] = "Maximum precipitation rate"
-
-        fino.to_netcdf(
+        write_tracking_file(
             nc_file,
-            mode="w",
-            format="NETCDF4",
-            encoding={
-                "time": {
-                    "units": "hours since 1900-01-01 00:00:00",
-                    "calendar": "standard",
-                    "dtype": "int32",
-                },
-                "z500": {"zlib": True, "complevel": 5},
-                "u200": {"zlib": True, "complevel": 5},
-                "cy_z500_objects": {"zlib": True, "complevel": 5},
-                "col_objects": {"zlib": True, "complevel": 5},
+            times,
+            grid,
+            {
+                "cy_z500_objects": (
+                    cy_z500_objects,
+                    {"long_name": "500 hPa cyclone object labels"},
+                ),
+                "col_objects": (col_objects, {"long_name": "cut-off low object labels"}),
+                "front_objects": (front_objects, {"long_name": "front object labels"}),
+                "z500": (z500_data, {"units": "m**2 s**-2", "long_name": "500 hPa geopotential"}),
+                "u200": (u200_data, {"units": "m s**-1", "long_name": "200 hPa zonal wind"}),
+                "t850": (t850_data, {"units": "K", "long_name": "850 hPa temperature"}),
+                "u850": (u850_data, {"units": "m s**-1", "long_name": "850 hPa zonal wind"}),
+                "v850": (v850_data, {"units": "m s**-1", "long_name": "850 hPa meridional wind"}),
+                "pr": (
+                    pr_data,
+                    {"units": "mm", "description": "Accumulated precipitation over the time step"},
+                ),
+                "pr_max": (
+                    pr_data_max,
+                    {
+                        "units": "mm",
+                        "description": "Maximum per-input-step precipitation within the time step",
+                    },
+                ),
             },
         )
 

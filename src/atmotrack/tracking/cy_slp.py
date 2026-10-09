@@ -5,21 +5,28 @@ import logging
 import time
 
 import numpy as np
-import xarray as xr
 from scipy import ndimage
 from skimage.feature import peak_local_max
 from skimage.segmentation import watershed
 
 from atmotrack import config as cfg
+from atmotrack.grid import Grid
+from atmotrack.output import write_tracking_file
 from atmotrack.utils import Fore, Style
 
 from .shared import (
     BreakupObjects,
     ConnectLon,
-    calc_grid_distance_area,
     clean_up_objects,
     smooth_uniform,
 )
+
+
+def watershed_time_steps(dT):
+    """Temporal smoothing window of the watershed distance field, in time steps."""
+    hours = cfg.get("watershed_time_window_h", default=12)
+    return max(1, int(round(hours / dT)))
+
 
 logger = logging.getLogger("atmotrack")
 
@@ -33,6 +40,7 @@ def watershed_2d_overlap(
     min_dist=10,  # min distance between local maxima [index units]
     threshold=1,  # absolute threshold for local maxima [anomaly units]
     mintime=0,  # minimum lifetime of an object [h]
+    time_window=None,  # temporal smoothing window [time steps]; default from config
 ):
     """Break up overlapping 2D objects in 3D via watershed segmentation
     and connect them across timesteps by maximum overlap."""
@@ -42,8 +50,10 @@ def watershed_2d_overlap(
     if np.max(anom_sel_masked) <= 0:
         anom_sel_masked = anom_sel_masked[:] * -1
 
+    if time_window is None:
+        time_window = watershed_time_steps(dT)
     distance = anom_sel_masked[:]
-    distance = smooth_uniform(distance, 4, int(750 / (Gridspacing / 1000.0)) * 2)
+    distance = smooth_uniform(distance, time_window, int(750 / (Gridspacing / 1000.0)) * 2)
 
     local_maxi = np.zeros(distance.shape, dtype=bool)
     markers = np.zeros(distance.shape, dtype=np.int32)
@@ -147,16 +157,13 @@ def CY_ACY_slp_tracking(
     MinTimeACY_SLP = cfg.MinTimeACY_SLP
     breakup_method = cfg.slp_breakup_method
 
-    # Calculating grid distances and areas
-    _, _, grid_cell_area, grid_spacing = calc_grid_distance_area(Lat, Lon)
-    grid_cell_area[grid_cell_area < 0] = 0
+    grid = Grid(Lon, Lat)
+    grid_spacing = grid.spacing
 
     obj_structure_3D = np.ones((3, 3, 3))
 
-    # Connect over date line?
-    crosses_dateline = False
-    if (Lon[0, 0] < -176) & (Lon[0, -1] > 176):
-        crosses_dateline = True
+    # Connect over the longitude seam of a global grid?
+    crosses_dateline = grid.is_global_periodic
 
     end_time = time.time()
     logger.debug(
@@ -249,31 +256,17 @@ def CY_ACY_slp_tracking(
     if nc_file is not None:
         logger.debug(f"{Style.BRIGHT} Save SLP objects into a netCDF")
 
-        fino = xr.Dataset(
-            {
-                "cy_slp_objects": (["time", "latitude", "longitude"], cy_slp_objects),
-                "acy_slp_objects": (["time", "latitude", "longitude"], acy_slp_objects),
-                "slp": (["time", "latitude", "longitude"], slp_data),
-            },
-            coords={
-                "time": times.values,
-                "latitude": Lat[:, 0].squeeze(),
-                "longitude": Lon[0, :].squeeze(),
-            },
-        )
-
-        fino.to_netcdf(
+        write_tracking_file(
             nc_file,
-            mode="w",
-            encoding={
-                "time": {
-                    "units": "hours since 1900-01-01 00:00:00",
-                    "calendar": "standard",
-                    "dtype": "int32",
-                },
-                "slp": {"zlib": True, "complevel": 5},
-                "cy_slp_objects": {"zlib": True, "complevel": 5},
-                "acy_slp_objects": {"zlib": True, "complevel": 5},
+            times,
+            grid,
+            {
+                "cy_slp_objects": (cy_slp_objects, {"long_name": "surface cyclone object labels"}),
+                "acy_slp_objects": (
+                    acy_slp_objects,
+                    {"long_name": "surface anticyclone object labels"},
+                ),
+                "slp": (slp_data, {"units": "Pa", "long_name": "mean sea-level pressure"}),
             },
         )
 

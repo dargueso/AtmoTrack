@@ -2,8 +2,8 @@
 
 Every tracking command processes one calendar year per worker, in parallel
 over the years found in the input data.  This module holds the argument
-parser, the logger set-up, the BLAS thread limits and the year discovery that
-all of them share.
+parser, the logger set-up, the BLAS thread limits, the year discovery and the
+stream loader that brings every input to the configured time step ``DT``.
 """
 
 from __future__ import annotations
@@ -13,11 +13,23 @@ import logging
 import os
 import time
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 
+import numpy as np
+import xarray as xr
 from joblib import Parallel, delayed
 
 from atmotrack import config as cfg
-from atmotrack.io import available_years, open_pattern
+from atmotrack import timeaxis
+from atmotrack.io import (
+    accumulate_to_dt,
+    available_years,
+    ensure_tyx,
+    load_grid,
+    open_years,
+    spatial_dims,
+    subsample_to_dt,
+)
 from atmotrack.utils import get_logger
 
 LOG_FILE = "out.log"
@@ -87,11 +99,9 @@ def select_years(all_years: Iterable[int], args: argparse.Namespace) -> list[int
 
 def years_in_pattern(pattern_key: str, args: argparse.Namespace) -> list[int]:
     """Years available in the files matching ``cfg.<pattern_key>``, within the range."""
-    ds = open_pattern(pattern_key)
-    try:
-        all_years = available_years(ds)
-    finally:
-        ds.close()
+    t0 = time.time()
+    all_years = available_years(pattern_key)
+    get_logger(LOGGER_NAME).debug(f"Indexed {pattern_key} in {time.time() - t0:.1f} s")
     return select_years(all_years, args)
 
 
@@ -122,10 +132,118 @@ def worker_logger(verbose: bool) -> logging.Logger:
     return get_logger(LOGGER_NAME, level=logging.DEBUG if verbose else logging.INFO)
 
 
-def warn_if_dt_differs(logger: logging.Logger, dt_data: int) -> None:
-    """Warn when the data timestep differs from ``[general] DT`` in the config."""
-    if dt_data != cfg.DT:
-        logger.warning(
-            f"Data timestep ({dt_data} h) differs from config DT ({cfg.DT} h). "
-            "Tracking thresholds use cfg.DT — update [general] DT in config.toml if needed."
+# ---------------------------------------------------------------------------
+# Stream loading at the configured time step
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class Stream:
+    """One input stream for one year, aligned to ``cfg.DT``."""
+
+    ds: xr.Dataset
+    times: object  # DatetimeIndex or CFTimeIndex
+    lon: np.ndarray
+    lat: np.ndarray
+    ydim: str
+    xdim: str
+
+    def field(self, var_key: str) -> np.ndarray:
+        """Instantaneous variable ``cfg.<var_key>`` as ``(time, y, x)`` at DT."""
+        name = getattr(cfg, var_key)
+        if name not in self.ds:
+            raise KeyError(
+                f"variable '{name}' ({var_key}) not found in the input files; "
+                f"available: {list(self.ds.data_vars)}"
+            )
+        da = ensure_tyx(self.ds[name], self.ydim, self.xdim)
+        da = subsample_to_dt(da, cfg.DT)
+        values = np.asarray(da.values)
+        if values.shape[0] != len(self.times):
+            raise ValueError(
+                f"'{name}': {values.shape[0]} steps after alignment, expected {len(self.times)}"
+            )
+        return values
+
+    def accumulated(self, var_key: str, canon: str = "tp", target_times=None):
+        """Accumulated variable at DT in canonical units: ``(total, peak)`` arrays.
+
+        The source units come from the file's ``units`` attribute (or the
+        ``units_<canon>`` config override) and are converted with the same table
+        as ``atmotrack-prepare`` (ERA5 ``tp`` in m -> mm; rates -> amounts per
+        step).  Values on a finer step are summed over each DT window (peak = the
+        largest per-input-step value in the window) and the windows are placed on
+        *target_times* (the DT axis of the instantaneous streams; default: this
+        stream's own axis after accumulation).  Missing windows are zero.
+        """
+        from atmotrack.prepare import convert_units, precipitation_kind
+
+        name = getattr(cfg, var_key)
+        if name not in self.ds:
+            raise KeyError(
+                f"variable '{name}' ({var_key}) not found in the input files; "
+                f"available: {list(self.ds.data_vars)}"
+            )
+        da = ensure_tyx(self.ds[name], self.ydim, self.xdim)
+        da, kind = convert_units(da, canon)
+        total, peak = accumulate_to_dt(da, cfg.DT, kind=precipitation_kind(kind))
+        ref = total[cfg.time_var] if target_times is None else target_times
+        target = np.asarray(ref.values if hasattr(ref, "values") else ref)
+        total = total.reindex({cfg.time_var: target}, fill_value=0.0)
+        peak = peak.reindex({cfg.time_var: target}, fill_value=0.0)
+        return np.asarray(total.values), np.asarray(peak.values)
+
+
+def load_stream(pattern_key: str, year: int, logger: logging.Logger | None = None) -> Stream:
+    """Open the files of *pattern_key* for *year* and align the time axis to ``cfg.DT``.
+
+    Instantaneous streams at a finer step than DT are subsampled; a step that
+    does not divide DT is an error (run ``atmotrack-check-input``).
+    """
+    logger = logger or get_logger(LOGGER_NAME)
+    t0 = time.time()
+    ds = open_years(pattern_key, year)
+    times = timeaxis.load_times(ds, cfg.time_var)
+    step = timeaxis.step_hours(times)
+    if not np.isnan(step) and not np.isclose(step, cfg.DT):
+        ratio = cfg.DT / step
+        if ratio < 1 or not np.isclose(ratio, round(ratio)):
+            raise ValueError(
+                f"{pattern_key}: data step {step:g} h is incompatible with DT={cfg.DT:g} h "
+                "(must be equal or a divisor). Run atmotrack-check-input, or prepare the data "
+                "with atmotrack-prepare, or change [general] DT."
+            )
+        mask = timeaxis.on_step_mask(times, cfg.DT)
+        ds = ds.isel({cfg.time_var: np.where(mask)[0]})
+        times = timeaxis.load_times(ds, cfg.time_var)
+        logger.debug(f"{pattern_key}: subsampled {step:g} h -> {cfg.DT:g} h")
+    lon, lat = load_grid(ds)
+    ydim, xdim = spatial_dims(ds)
+    logger.debug(f"{pattern_key} {year}: {timeaxis.describe(times)} ({time.time() - t0:.1f} s)")
+    return Stream(ds=ds, times=times, lon=lon, lat=lat, ydim=ydim, xdim=xdim)
+
+
+def load_precip_stream(pattern_key: str, year: int, logger: logging.Logger | None = None):
+    """Open a precipitation stream for *year* without subsampling (accumulated later)."""
+    logger = logger or get_logger(LOGGER_NAME)
+    ds = open_years(pattern_key, year)
+    times = timeaxis.load_times(ds, cfg.time_var)
+    lon, lat = load_grid(ds)
+    ydim, xdim = spatial_dims(ds)
+    logger.debug(f"{pattern_key} {year}: {timeaxis.describe(times)}")
+    return Stream(ds=ds, times=times, lon=lon, lat=lat, ydim=ydim, xdim=xdim)
+
+
+def check_same_grid(a: Stream, b: Stream, what: str) -> None:
+    if a.lon.shape != b.lon.shape or not (
+        np.allclose(a.lon, b.lon, atol=1e-4) and np.allclose(a.lat, b.lat, atol=1e-4)
+    ):
+        raise ValueError(f"{what}: input streams are on different grids; regrid before tracking")
+
+
+def check_same_times(a: Stream, b: Stream, what: str) -> None:
+    if len(a.times) != len(b.times) or any(x != y for x, y in zip(a.times, b.times)):
+        raise ValueError(
+            f"{what}: input streams have different time axes after alignment to DT="
+            f"{cfg.DT:g} h ({timeaxis.describe(a.times)} vs {timeaxis.describe(b.times)})"
         )

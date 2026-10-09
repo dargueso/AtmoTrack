@@ -7,9 +7,9 @@ concatenates them into annual NetCDF files that match AtmoTrack's naming
 convention:
 
   era5_daily_500hPa_YYYY.nc  — 500 hPa geopotential + temperature   (6-hourly)
-  era5_daily_200hPa_YYYY.nc  — 200 hPa u-wind                        (6-hourly)
+  era5_daily_200hPa_YYYY.nc  — 200 hPa u,v-wind                      (6-hourly)
   era5_daily_300hPa_YYYY.nc  — 300 hPa u-wind                        (6-hourly)
-  era5_daily_850hPa_YYYY.nc  — 850 hPa u,v-wind + temperature        (6-hourly)
+  era5_daily_850hPa_YYYY.nc  — 850 hPa u,v-wind + temperature + q    (6-hourly)
   era5_daily_SLP_YYYY.nc     — Mean sea-level pressure                (3-hourly)
   era5_daily_PR_YYYY.nc      — Total precipitation                    (hourly)
 
@@ -71,11 +71,11 @@ DATASETS = {
     ),
     "z200": dict(
         api="reanalysis-era5-pressure-levels",
-        variables=["u_component_of_wind"],
+        variables=["u_component_of_wind", "v_component_of_wind"],
         levels=["200"],
         times=_TIMES_6H,
         prefix="era5_daily_200hPa",
-        description="200 hPa u-wind",
+        description="200 hPa u,v-wind",
     ),
     "z300": dict(
         api="reanalysis-era5-pressure-levels",
@@ -87,11 +87,16 @@ DATASETS = {
     ),
     "z850": dict(
         api="reanalysis-era5-pressure-levels",
-        variables=["u_component_of_wind", "v_component_of_wind", "temperature"],
+        variables=[
+            "u_component_of_wind",
+            "v_component_of_wind",
+            "temperature",
+            "specific_humidity",
+        ],
         levels=["850"],
         times=_TIMES_6H,
         prefix="era5_daily_850hPa",
-        description="850 hPa u,v-wind + temperature",
+        description="850 hPa u,v-wind + temperature + specific humidity",
     ),
     "slp": dict(
         api="reanalysis-era5-single-levels",

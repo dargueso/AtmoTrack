@@ -6,14 +6,15 @@ import time
 
 import numpy as np
 import scipy.ndimage as filters
-import xarray as xr
 from scipy import ndimage
 
 from atmotrack import config as cfg
 from atmotrack.constants import const
+from atmotrack.grid import Grid
+from atmotrack.output import write_tracking_file
 from atmotrack.utils import Fore, Style
 
-from .shared import BreakupObjects, ConnectLon, calc_grid_distance_area, clean_up_objects
+from .shared import BreakupObjects, ConnectLon, clean_up_objects, smooth_uniform
 
 logger = logging.getLogger("atmotrack")
 
@@ -33,18 +34,14 @@ def CY_ACY_z500_tracking(z500_data, times, Lon, Lat, nc_file=None):
     z500_smooth_method = cfg.z500_smooth_method
     z500_smooth_scale_km = cfg.z500_smooth_scale_km
 
-    # Calculating grid distances and areas
-    _, _, grid_cell_area, grid_spacing = calc_grid_distance_area(Lat, Lon)
-    grid_cell_area[grid_cell_area < 0] = 0
+    # Grid description (regular or curvilinear, any lat order / lon convention)
+    grid = Grid(Lon, Lat)
+    grid_spacing = grid.spacing
 
     obj_structure_3D = np.ones((3, 3, 3))
 
-    times[0]
-
-    # connect over date line?
-    crosses_dateline = False
-    if (Lon[0, 0] < -176) & (Lon[0, -1] > 176):
-        crosses_dateline = True
+    # connect over the longitude seam of a global grid?
+    crosses_dateline = grid.is_global_periodic
 
     end_time = time.time()
     logger.debug(
@@ -64,16 +61,10 @@ def CY_ACY_z500_tracking(z500_data, times, Lon, Lat, nc_file=None):
     if z500_smooth_method == "gaussian":
         z500_smooth = filters.gaussian_filter(z500, sigma=(0, spatial_steps, spatial_steps))
     else:
-        z500_smooth = filters.uniform_filter(z500, size=(1, spatial_steps, spatial_steps))
+        z500_smooth = smooth_uniform(z500, 1, spatial_steps)
 
-    z500_smooth_mean = filters.uniform_filter(
-        z500,
-        size=(
-            int(78 / DT),
-            int(3000 / (grid_spacing / 1000.0)),
-            int(3000 / (grid_spacing / 1000.0)),
-        ),
-    )
+    # Background: 78 h temporal, 3000 km spatial running mean
+    z500_smooth_mean = smooth_uniform(z500, int(78 / DT), int(3000 / (grid_spacing / 1000.0)))
 
     z500_smooth_anom = z500_smooth - z500_smooth_mean
 
@@ -118,31 +109,20 @@ def CY_ACY_z500_tracking(z500_data, times, Lon, Lat, nc_file=None):
     if nc_file is not None:
         logger.debug(f"{Style.BRIGHT} Save objects into a netCDF")
 
-        fino = xr.Dataset(
-            {
-                "cy_z500_objects": (["time", "latitude", "longitude"], cy_z500_objects),
-                "acy_z500_objects": (["time", "latitude", "longitude"], acy_z500_objects),
-                "z500": (["time", "latitude", "longitude"], z500_data),
-            },
-            coords={
-                "time": times.values,
-                "latitude": Lat[:, 0].squeeze(),
-                "longitude": Lon[0, :].squeeze(),
-            },
-        )
-
-        fino.to_netcdf(
+        write_tracking_file(
             nc_file,
-            mode="w",
-            encoding={
-                "time": {
-                    "units": "hours since 1900-01-01 00:00:00",
-                    "calendar": "standard",
-                    "dtype": "int32",
-                },
-                "z500": {"zlib": True, "complevel": 5},
-                "cy_z500_objects": {"zlib": True, "complevel": 5},
-                "acy_z500_objects": {"zlib": True, "complevel": 5},
+            times,
+            grid,
+            {
+                "cy_z500_objects": (
+                    cy_z500_objects,
+                    {"long_name": "500 hPa cyclone object labels"},
+                ),
+                "acy_z500_objects": (
+                    acy_z500_objects,
+                    {"long_name": "500 hPa anticyclone object labels"},
+                ),
+                "z500": (z500_data, {"units": "m**2 s**-2", "long_name": "500 hPa geopotential"}),
             },
         )
 

@@ -12,10 +12,11 @@ import time
 from itertools import groupby
 
 import numpy as np
-import xarray as xr
 from scipy.ndimage import find_objects, gaussian_filter
 
 from atmotrack import config as cfg
+from atmotrack.grid import Grid, to_pm180
+from atmotrack.output import write_tracking_file
 from atmotrack.utils import Fore, Style
 
 logger = logging.getLogger("atmotrack")
@@ -46,7 +47,7 @@ def is_land(lon, lat):
     """Return True if the point (lon, lat) is over land."""
     import shapely.geometry as sgeom
 
-    return _get_land().contains(sgeom.Point(lon, lat))
+    return _get_land().contains(sgeom.Point(float(to_pm180(lon)), lat))
 
 
 # ---------------------------------------------------------------------------
@@ -89,7 +90,13 @@ def TC_tracking(CY_objects, t850, slp, Lon, Lat, times=None, nc_file=None):
     TC_T850min = cfg.TC_T850min
     TC_Pmin = cfg.TC_Pmin
     TC_lat_max = cfg.TC_lat_max
-    TC_min_duration = cfg.TC_min_duration
+    DT = cfg.DT
+    # Durations are configured in hours and converted to time steps here
+    TC_min_duration = int(cfg.get("TC_min_duration_h", renamed_from="TC_min_duration") / DT)
+    TC_persistence = int(cfg.get("TC_persistence_h", default=24) / DT)
+
+    grid = Grid(Lon, Lat)
+    periodic = grid.is_global_periodic
 
     TC_Tracks = {}
     TC_obj = np.zeros_like(CY_objects, dtype=int)
@@ -112,8 +119,8 @@ def TC_tracking(CY_objects, t850, slp, Lon, Lat, times=None, nc_file=None):
         LonObj = Lon[obj_slice[1], obj_slice[2]]
         LatObj = Lat[obj_slice[1], obj_slice[2]]
 
-        # Step 3 — date-line handling
-        date_line = LonObj.max() - LonObj.min() > 359
+        # Step 3 — objects wrapping around the longitude seam of a global grid
+        date_line = periodic and bool(ObjACT[:, :, 0].any() and ObjACT[:, :, -1].any())
         if date_line:
             roll_amount = int(ObjACT.shape[2] / 2)
             ObjACT = np.roll(ObjACT, roll_amount, axis=2)
@@ -163,7 +170,7 @@ def TC_tracking(CY_objects, t850, slp, Lon, Lat, times=None, nc_file=None):
         WarmCore = DeltaTCore > TC_deltaT_core
 
         # Step 8 — warm-core duration
-        if np.sum(WarmCore) < 8:
+        if np.sum(WarmCore) < TC_persistence:
             continue
         ObjACT[~WarmCore, :, :] = 0
 
@@ -172,7 +179,7 @@ def TC_tracking(CY_objects, t850, slp, Lon, Lat, times=None, nc_file=None):
 
         # Step 10 — minimum SLP
         MinPress = np.min(slp_ACT, axis=(1, 2))
-        if np.sum(MinPress < TC_Pmin) < 8:
+        if np.sum(MinPress < TC_Pmin) < TC_persistence:
             continue
 
         # Step 11 — TCcheck mask: combine all three criteria
@@ -227,34 +234,15 @@ def TC_tracking(CY_objects, t850, slp, Lon, Lat, times=None, nc_file=None):
     if nc_file is not None:
         logger.debug(f"{Style.BRIGHT} Save TC objects into a NetCDF")
 
-        ds_vars = {
-            "tc_objects": (["time", "latitude", "longitude"], TC_obj.astype(np.int16)),
-            "slp": (["time", "latitude", "longitude"], slp.astype(np.float32)),
-        }
-        coords = {"time": times.values} if times is not None else {}
-        coords["latitude"] = Lat[:, 0].squeeze()
-        coords["longitude"] = Lon[0, :].squeeze()
-
-        fino = xr.Dataset(ds_vars, coords=coords)
-
-        time_enc = (
-            {
-                "time": {
-                    "units": "hours since 1900-01-01 00:00:00",
-                    "calendar": "standard",
-                    "dtype": "int32",
-                }
-            }
-            if times is not None
-            else {}
-        )
-        fino.to_netcdf(
+        if times is None:
+            raise ValueError("TC_tracking needs `times` to write a NetCDF file")
+        write_tracking_file(
             nc_file,
-            mode="w",
-            encoding={
-                **time_enc,
-                "tc_objects": {"zlib": True, "complevel": 5},
-                "slp": {"zlib": True, "complevel": 5},
+            times,
+            grid,
+            {
+                "tc_objects": (TC_obj, {"long_name": "tropical cyclone object labels"}),
+                "slp": (slp, {"units": "Pa", "long_name": "mean sea-level pressure"}),
             },
         )
 
