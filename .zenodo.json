@@ -2,7 +2,7 @@
   "title": "AtmoTrack: Atmospheric system tracking from CF-compliant NetCDF data",
   "upload_type": "software",
   "access_right": "open",
-  "license": "MIT",
+  "license": "mit",
   "creators": [
     {
       "name": "Argüeso, Daniel",
@@ -22,13 +22,5 @@
     "jet stream",
     "feature tracking",
     "Python"
-  ],
-  "related_identifiers": [
-    {
-      "identifier": "https://github.com/dargueso/AtmoTrack",
-      "relation": "isSupplementTo",
-      "resource_type": "software",
-      "scheme": "url"
-    }
   ]
 }
