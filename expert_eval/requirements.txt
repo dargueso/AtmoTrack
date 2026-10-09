@@ -1,5 +1,0 @@
-# Serving the site (app.py, admin.py) only needs Flask; everything else is stdlib.
-flask>=3.0
-
-# Building cases (build_cases.py) and enrich_responses.py use the AtmoTrack
-# environment (numpy, scipy, xarray, netCDF4, matplotlib, cartopy, joblib).

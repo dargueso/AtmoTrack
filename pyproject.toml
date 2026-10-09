@@ -7,14 +7,23 @@ build-backend = "setuptools.build_meta"
 # ---------------------------------------------------------------------------
 name = "atmotrack"
 version = "1.0.0"
-description = "Atmospheric system tracking from ERA5 reanalysis data"
+description = "Atmospheric system tracking (cut-off lows, cyclones, tropical cyclones, jets, atmospheric rivers) from CF-compliant NetCDF data"
 readme = "README.md"
 license = { text = "MIT" }
 authors = [
     { name = "Daniel Argüeso", email = "d.argueso@uib.es" },
 ]
 requires-python = ">=3.11"
-keywords = ["atmospheric-science", "ERA5", "cyclone-tracking", "cut-off-lows"]
+keywords = [
+    "atmospheric-science",
+    "ERA5",
+    "reanalysis",
+    "cyclone-tracking",
+    "cut-off-lows",
+    "atmospheric-rivers",
+    "jet-stream",
+    "tropical-cyclones",
+]
 classifiers = [
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
@@ -23,6 +32,7 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Atmospheric Science",
     "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
 ]
 dependencies = [
     "numpy>=1.24",
@@ -35,23 +45,43 @@ dependencies = [
     "joblib>=1.3",
 ]
 
+[project.urls]
+Homepage = "https://github.com/dargueso/AtmoTrack"
+Repository = "https://github.com/dargueso/AtmoTrack"
+Issues = "https://github.com/dargueso/AtmoTrack/issues"
+Changelog = "https://github.com/dargueso/AtmoTrack/blob/main/CHANGELOG.md"
+
 [project.optional-dependencies]
+# Land/sea test used by the tropical cyclone filter (atmotrack-tc)
+tc       = ["cartopy>=0.22", "shapely>=2.0"]
+# Copernicus CDS download (atmotrack-download-era5)
 download = ["cdsapi>=0.7", "python-dateutil>=2.8"]
-misc     = ["geopandas>=0.14", "cartopy>=0.22", "regionmask>=0.10", "scipy>=1.10"]
 dev      = ["pytest>=7.0", "ruff>=0.4"]
+
+[project.scripts]
+atmotrack-col           = "atmotrack.cli.col:main"
+atmotrack-cy-z500       = "atmotrack.cli.cy_z500:main"
+atmotrack-cy-slp        = "atmotrack.cli.cy_slp:main"
+atmotrack-tc            = "atmotrack.cli.tc:main"
+atmotrack-jet           = "atmotrack.cli.jet:main"
+atmotrack-ar-850        = "atmotrack.cli.ar850:main"
+atmotrack-ar-ivt        = "atmotrack.cli.ar_ivt:main"
+atmotrack-download-era5 = "atmotrack.cli.download_era5:main"
+atmotrack-config        = "atmotrack.cli.config_cmd:main"
 
 # ---------------------------------------------------------------------------
 [tool.setuptools.packages.find]
-# Only package the source files; data dirs are excluded automatically
-exclude = ["data_era5*", "data_tracking*", "events_stats*"]
+# ---------------------------------------------------------------------------
+where = ["src"]
+
+[tool.setuptools.package-data]
+atmotrack = ["config.toml"]
 
 # ---------------------------------------------------------------------------
 [tool.pytest.ini_options]
 # ---------------------------------------------------------------------------
-testpaths = ["test_smoke.py"]
+testpaths = ["tests"]
 addopts   = "-v"
-# Mark the full pipeline tests as slow so they can be skipped in CI if needed:
-#   pytest -m "not slow"
 markers = [
     "slow: marks tests as slow (full tracking pipeline)",
 ]
@@ -61,7 +91,6 @@ markers = [
 # ---------------------------------------------------------------------------
 line-length = 100
 target-version = "py311"
-exclude = ["Tracking_Functions_old.py"]
 
 [tool.ruff.lint]
 # E/W: pycodestyle  F: pyflakes  I: isort  UP: pyupgrade  NPY: numpy style
@@ -73,4 +102,4 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["atmotrack_config", "tracking", "tracking_functions", "constants", "utils"]
+known-first-party = ["atmotrack"]

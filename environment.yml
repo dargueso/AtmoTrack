@@ -1,15 +1,13 @@
 name: atmotrack
 channels:
   - conda-forge
-  - defaults
 dependencies:
-  - python=3.13
+  - python>=3.11
   # Core scientific stack
   - numpy>=1.24
   - scipy>=1.10
   - xarray>=2023.1
   - pandas>=2.0
-  - dask
   # NetCDF I/O
   - netCDF4>=1.6
   # Image processing (watershed breakup)
@@ -18,16 +16,10 @@ dependencies:
   - metpy>=1.5
   # Parallelism
   - joblib>=1.3
-  # Progress bars
-  - tqdm
-  # Plotting
-  - matplotlib>=3.7
+  # Land/sea test for the tropical cyclone filter (atmotrack-tc)
   - cartopy>=0.22
-  # Geospatial / mask utilities (used by Misc/ scripts)
-  - geopandas>=0.14
-  - regionmask>=0.10
-  - rasterio
-  # CDS download (download_ERA5.py)
+  - shapely>=2.0
+  # CDS download (atmotrack-download-era5)
   - python-dateutil>=2.8
   # Development / testing
   - pytest>=7.0
@@ -36,3 +28,4 @@ dependencies:
   - pip
   - pip:
     - cdsapi>=0.7
+    - -e .
